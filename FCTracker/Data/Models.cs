@@ -158,4 +158,9 @@ public class CharacterRecord
     // The Dalamud roaming path this character was last seen under (used to group/
     // label by account). Empty for imported records until seen live.
     public string AccountKey = string.Empty;
+
+    // The character's own rank within the FC (e.g. "Master", "Officer"). Not in any
+    // clean struct — only captured by an optional, best-effort scrape of the FC
+    // Members window. May be empty.
+    public string MyFcRank = string.Empty;
 }

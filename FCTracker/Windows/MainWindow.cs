@@ -153,43 +153,95 @@ public class MainWindow : Window
     // ---- Grouped by FC ----
     private void DrawGrouped(System.Collections.Generic.List<CharacterRecord> rows)
     {
-        // Bucket by FC name (characters with no FC go under "Not in an FC").
-        var groups = new System.Collections.Generic.SortedDictionary<string,
-            System.Collections.Generic.List<CharacterRecord>>(StringComparer.OrdinalIgnoreCase);
+        var cfg = plugin.Config;
+
+        // Bucket by FC id (fall back to name). Characters with no FC go under a
+        // per-world "Not in an FC" bucket.
+        var groups = new System.Collections.Generic.Dictionary<string,
+            System.Collections.Generic.List<CharacterRecord>>();
 
         foreach (var c in rows)
         {
-            var key = c.Fc != null && !string.IsNullOrEmpty(c.Fc.Name) ? c.Fc.Name : "Not in an FC";
+            string key;
+            if (c.Fc != null && !string.IsNullOrEmpty(c.Fc.Name))
+                key = c.Fc.Name;
+            else
+                key = $"Not in an FC ({(string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName)})";
+
             if (!groups.TryGetValue(key, out var list))
                 groups[key] = list = new();
             list.Add(c);
         }
 
-        foreach (var g in groups)
-        {
-            var first = g.Value[0].Fc;
-            var header = first != null && !string.IsNullOrEmpty(first.Tag)
-                ? $"{g.Key}  «{first.Tag}»  ({g.Value.Count})"
-                : $"{g.Key}  ({g.Value.Count})";
+        // Sort group names.
+        var keys = new System.Collections.Generic.List<string>(groups.Keys);
+        keys.Sort(StringComparer.OrdinalIgnoreCase);
 
-            if (ImGui.CollapsingHeader($"{header}###grp{g.Key}"))
+        foreach (var key in keys)
+        {
+            var members = groups[key];
+            var fc = members[0].Fc;
+
+            // FC header line with the FC-level info.
+            var tag = fc != null && !string.IsNullOrEmpty(fc.Tag) ? $" «{fc.Tag}»" : "";
+            var header = $"{key}{tag}  ({members.Count})";
+
+            if (!ImGui.CollapsingHeader($"{header}###grp{key}"))
+                continue;
+
+            ImGui.Indent(14 * ImGuiHelpers.GlobalScale);
+
+            // FC summary block.
+            if (fc != null)
             {
-                ImGui.Indent(16 * ImGuiHelpers.GlobalScale);
-                foreach (var c in g.Value)
+                var world = members[0].WorldName;
+                if (!string.IsNullOrEmpty(world)) ImGui.TextWrapped($"World: {world}");
+                ImGui.TextWrapped($"Level: {(fc.Rank > 0 ? fc.Rank.ToString() : "-")}    " +
+                                  $"Members: {fc.TotalMembers}    " +
+                                  $"Credits: {(string.IsNullOrEmpty(fc.CreditsText) ? "-" : fc.CreditsText)}");
+                DrawHouse(fc.House);
+
+                if (cfg.ShowFounderAndTime)
                 {
-                    var name = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
-                    var tri = expandedCid == c.ContentId ? "\u25BC " : "\u25B6 "; // ▼ / ▶
-                    if (ImGui.Selectable($"{tri}{name}###grow{c.ContentId}", expandedCid == c.ContentId))
-                        expandedCid = expandedCid == c.ContentId ? 0 : c.ContentId;
-                    if (expandedCid == c.ContentId)
-                    {
-                        ImGui.Indent(12 * ImGuiHelpers.GlobalScale);
-                        DrawCharacterDetail(c);
-                        ImGui.Unindent(12 * ImGuiHelpers.GlobalScale);
-                    }
+                    // Original winner: pull from any member's manual house-winner note.
+                    var winner = "";
+                    foreach (var m in members)
+                        if (!string.IsNullOrEmpty(m.ManualHouseWinner)) { winner = m.ManualHouseWinner; break; }
+                    ImGui.TextDisabled($"Original winner: {(string.IsNullOrEmpty(winner) ? "(unknown — set in a character's notes)" : winner)}");
                 }
-                ImGui.Unindent(16 * ImGuiHelpers.GlobalScale);
             }
+            else
+            {
+                ImGui.TextDisabled("These characters are not currently in a Free Company.");
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
+            ImGui.Separator();
+
+            // Character subrows.
+            foreach (var c in members)
+            {
+                var name = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+                var tri = expandedCid == c.ContentId ? "\u25BC " : "\u25B6 ";
+
+                var suffix = "";
+                if (cfg.ShowMemberFcRank && !string.IsNullOrEmpty(c.MyFcRank))
+                    suffix += $"  —  {c.MyFcRank}";
+                if (cfg.ShowFounderAndTime)
+                    suffix += $"  —  in FC since {ToLocal(c.FirstSeenInFcUtc)}";
+
+                if (ImGui.Selectable($"{tri}{name}{suffix}###grow{c.ContentId}", expandedCid == c.ContentId))
+                    expandedCid = expandedCid == c.ContentId ? 0 : c.ContentId;
+
+                if (expandedCid == c.ContentId)
+                {
+                    ImGui.Indent(12 * ImGuiHelpers.GlobalScale);
+                    DrawCharacterDetail(c);
+                    ImGui.Unindent(12 * ImGuiHelpers.GlobalScale);
+                }
+            }
+
+            ImGui.Unindent(14 * ImGuiHelpers.GlobalScale);
         }
     }
 
@@ -399,6 +451,8 @@ public class MainWindow : Window
 
             ImGui.TextDisabled($"FC data updated: {ToLocal(fc.LastUpdatedUtc)}");
             ImGui.TextDisabled($"First Registered: {ToLocal(c.FirstSeenInFcUtc)}");
+            if (plugin.Config.ShowMemberFcRank && !string.IsNullOrEmpty(c.MyFcRank))
+                ImGui.TextWrapped($"Your rank in FC: {c.MyFcRank}");
         }
 
         ImGui.Spacing();

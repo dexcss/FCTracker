@@ -47,6 +47,26 @@ public class SettingsWindow : Window
             config.Save();
         }
 
+        var showRank = config.ShowMemberFcRank;
+        if (ImGui.Checkbox("Show member FC rank (experimental)", ref showRank))
+        {
+            config.ShowMemberFcRank = showRank;
+            config.Save();
+        }
+        ImGui.TextDisabled("The game doesn't expose a member's rank cleanly. This scrapes the FC " +
+                           "window and only recognises default rank names (Master/Officer/Member/etc.); " +
+                           "custom-renamed ranks will show blank.");
+
+        var showFounder = config.ShowFounderAndTime;
+        if (ImGui.Checkbox("Show original winner / time-in-FC", ref showFounder))
+        {
+            config.ShowFounderAndTime = showFounder;
+            config.Save();
+        }
+        ImGui.TextDisabled("Original winner is manual/auto-detected only (not in the game). " +
+                           "Time-in-FC is measured from when this plugin first saw the character, " +
+                           "not a real join date.");
+
         ImGuiHelpers.ScaledDummy(6f);
 
         // --- Accounts ---

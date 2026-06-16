@@ -291,6 +291,16 @@ public sealed class Plugin : IDalamudPlugin
 
             record.Fc = fc;
             changed = true;
+
+            // Optional best-effort own-rank scrape.
+            if (Config.ShowMemberFcRank)
+            {
+                var rank = GameReader.TryReadOwnFcRank(GameGui, name);
+                if (!string.IsNullOrEmpty(rank) && rank != record.MyFcRank)
+                {
+                    record.MyFcRank = rank;
+                }
+            }
         }
 
         // --- Workshop vessels (only inside the FC workshop) ---

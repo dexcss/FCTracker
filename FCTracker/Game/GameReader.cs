@@ -117,6 +117,43 @@ public static unsafe class GameReader
 
     // Decode a null-terminated UTF8 string from a byte span (used for inline
     // struct strings that aren't declared with isString).
+    // BEST-EFFORT: read the logged-in character's own FC rank from the FreeCompany
+    // window's member context. There is no clean struct field for a member's rank,
+    // so this scrapes text nodes and may return empty. Gated behind a setting.
+    public static string TryReadOwnFcRank(IGameGui gameGui, string playerName)
+    {
+        if (string.IsNullOrEmpty(playerName)) return string.Empty;
+
+        // The FreeCompany window's INFO tab shows the viewing character's rank.
+        nint addr = gameGui.GetAddonByName("FreeCompany", 1);
+        if (addr == nint.Zero) return string.Empty;
+
+        var addon = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)addr;
+        if (addon == null || !addon->IsVisible) return string.Empty;
+
+        // Collect text nodes; only accept text that matches a known default FC rank
+        // name to avoid surfacing unrelated labels. Custom-renamed ranks won't match
+        // and will simply return empty (better than showing the wrong thing).
+        string[] known = { "Master", "Officer", "Member", "Recruit", "Veteran" };
+        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+        {
+            var node = addon->UldManager.NodeList[i];
+            if (node == null || node->Type != FFXIVClientStructs.FFXIV.Component.GUI.NodeType.Text)
+                continue;
+            var t = ((FFXIVClientStructs.FFXIV.Component.GUI.AtkTextNode*)node)->NodeText.ToString();
+            if (string.IsNullOrWhiteSpace(t)) continue;
+
+            var trimmed = t.Trim();
+            foreach (var k in known)
+            {
+                if (trimmed.Equals(k, StringComparison.OrdinalIgnoreCase))
+                    return trimmed;
+            }
+        }
+
+        return string.Empty;
+    }
+
     // Reads the prompt text from a SelectYesno addon (used for house-winner detect).
     public static string ReadSelectYesnoPrompt(nint addonPtr)
     {

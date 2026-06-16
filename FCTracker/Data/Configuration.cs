@@ -32,6 +32,10 @@ public class Configuration : IPluginConfiguration
     public bool GroupByFc = false;          // false = flat character list (default)
     public bool ShowAccountColumn = false;  // optional account-alias column/tag
 
+    // Optional (off by default) fields that aren't cleanly readable:
+    public bool ShowMemberFcRank = false;   // best-effort scrape of own FC rank
+    public bool ShowFounderAndTime = false; // founder/original-winner + time-in-FC
+
     // Account aliases: maps a detected Dalamud roaming path -> a friendly name the
     // user assigns (e.g. "Main", "Alt box"). The plugin auto-detects the path it is
     // running under; the alias itself is user-entered (the launcher's account label
