@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+    <PropertyGroup>
+        <Authors>Akari</Authors>
+        <AssemblyName>FCTracker</AssemblyName>
+        <Version>1.0.0.0</Version>
+        <Description>Tracks your characters' Free Companies: name, tag, level, master, credits, house ownership, and workshop airships/submersibles.</Description>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <TargetFramework>net10.0-windows</TargetFramework>
+        <Platforms>x64</Platforms>
+        <Nullable>enable</Nullable>
+        <DebugSymbols>true</DebugSymbols>
+        <DebugType>full</DebugType>
+        <LangVersion>latest</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <OutputType>Library</OutputType>
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+        <RootNamespace>FCTracker</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Content Include="FCTracker.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- For reading SubmarineTracker's SQLite database during import. -->
+        <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    </ItemGroup>
+
+    <PropertyGroup>
+        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    </PropertyGroup>
+</Project>

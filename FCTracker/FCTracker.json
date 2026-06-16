@@ -1,0 +1,22 @@
+{
+  "Author": "Akari",
+  "Name": "FC Tracker",
+  "Punchline": "Track your characters' Free Companies: level, tag, credits, house, and workshop vessels.",
+  "Description": "Records, per character, the Free Company you belong to and its details. Open with /fctracker (alias /fct).\n\n- Per-character table: character (with server), FC name, tag, level, house owned (Yes/No), submarines (Yes/No/N-A), and FC credits. Click any column header to sort; click a row to expand its full details below.\n- Captures FC name, tag, level, current master, member counts, and FC credits (credits are read from the FC window and then persist, updating when you reopen the window).\n- House checker: shows whether the FC owns an estate and, if so, the district, ward, plot, and world. Works anywhere, not just at the house.\n- Workshop vessels: airships and submersibles with their rank and build shorthand (e.g. SSUC++), captured while standing in the FC workshop.\n- First Registered date per character (first time the plugin saw you in the FC), plus editable manual notes for founder / house-winner info the game does not expose.\n- Optional shared storage so all clients on the same Windows user share one dataset, regardless of --roamingPath, with multi-client-safe merging.\n- Import existing data from AutoRetainer and Submarine Tracker.",
+  "InternalName": "FCTracker",
+  "AssemblyVersion": "1.0.0.0",
+  "RepoUrl": "https://github.com/dexcss/FCTracker",
+  "ApplicableVersion": "any",
+  "DalamudApiLevel": 15,
+  "Tags": [
+    "free company",
+    "fc",
+    "tracker",
+    "house",
+    "airship",
+    "submersible",
+    "credits"
+  ],
+  "CategoryTags": [ "Utility" ],
+  "IconUrl": "https://raw.githubusercontent.com/dexcss/FCTracker/main/images/icon.png"
+}

@@ -1,0 +1,82 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'   # push a tag like v1.0.0.0 to trigger a release
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download Dalamud
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev"
+        shell: pwsh
+
+      - name: Restore
+        run: dotnet restore FCTracker/FCTracker.csproj
+
+      - name: Build
+        run: dotnet build FCTracker/FCTracker.csproj -c Release --no-restore
+
+      # Clean the build output down to just what ships:
+      #  - Drop DalamudPackager's own output folder (bin/Release/FCTracker/),
+      #    which contains a full pre-trim latest.zip we don't want nested inside
+      #    our archive.
+      #  - Trim native runtimes to win-x64 only (FFXIV is always Windows x64);
+      #    Microsoft.Data.Sqlite ships Linux/macOS/win-x86 natives we don't need.
+      #  - Drop debug symbols and any stray zips.
+      - name: Clean output
+        run: |
+          $out = "FCTracker/bin/Release"
+
+          # Remove DalamudPackager's packaged subfolder (named after the assembly).
+          $pkg = Join-Path $out "FCTracker"
+          if (Test-Path $pkg) { Remove-Item $pkg -Recurse -Force; Write-Host "Removed nested packager folder." }
+
+          # Trim runtimes to win-x64 only.
+          $rt = Join-Path $out "runtimes"
+          if (Test-Path $rt) {
+            Get-ChildItem $rt -Directory | Where-Object { $_.Name -ne 'win-x64' } | Remove-Item -Recurse -Force
+            Write-Host "Trimmed runtimes to win-x64."
+          }
+
+          # Drop debug symbols and any leftover zips.
+          Get-ChildItem $out -Filter *.pdb | Remove-Item -Force
+          Get-ChildItem $out -Filter *.zip | Remove-Item -Force
+
+          # Newtonsoft.Json is provided by Dalamud at runtime; don't ship our own
+          # copy or it can conflict with the loader's version.
+          $njson = Join-Path $out "Newtonsoft.Json.dll"
+          if (Test-Path $njson) { Remove-Item $njson -Force; Write-Host "Removed bundled Newtonsoft.Json." }
+
+          Write-Host "Remaining top-level items:"
+          Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
+        shell: pwsh
+
+      - name: Package
+        run: |
+          $out = "FCTracker/bin/Release"
+          Compress-Archive -Path "$out/*" -DestinationPath "$out/FCTracker.zip" -Force
+          $size = (Get-Item "$out/FCTracker.zip").Length / 1MB
+          Write-Host ("Final zip size: {0:N1} MB" -f $size)
+        shell: pwsh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FCTracker/bin/Release/FCTracker.zip
+          generate_release_notes: true

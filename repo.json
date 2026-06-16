@@ -1,0 +1,28 @@
+[
+  {
+    "Author": "Akari",
+    "Name": "FC Tracker",
+    "Punchline": "Track your characters' Free Companies: level, tag, credits, house, and workshop vessels.",
+    "Description": "Records, per character, the Free Company you belong to: name, tag, level, current master, member counts, FC credits, house ownership (district/ward/plot/world), and workshop airships & submersibles with build shorthand. Sortable table with click-to-expand details, a First Registered date, editable founder/house-winner notes, optional shared storage across all clients, and import from AutoRetainer and Submarine Tracker. Open with /fctracker (alias /fct).",
+    "InternalName": "FCTracker",
+    "AssemblyVersion": "1.0.0.0",
+    "TestingAssemblyVersion": "1.0.0.0",
+    "RepoUrl": "https://github.com/dexcss/FCTracker",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 15,
+    "Tags": [
+      "free company",
+      "fc",
+      "tracker",
+      "house",
+      "airship",
+      "submersible",
+      "credits"
+    ],
+    "CategoryTags": [ "Utility" ],
+    "IconUrl": "https://raw.githubusercontent.com/dexcss/FCTracker/main/images/icon.png",
+    "DownloadLinkInstall": "https://github.com/dexcss/FCTracker/releases/latest/download/FCTracker.zip",
+    "DownloadLinkUpdate": "https://github.com/dexcss/FCTracker/releases/latest/download/FCTracker.zip",
+    "DownloadLinkTesting": "https://github.com/dexcss/FCTracker/releases/latest/download/FCTracker.zip"
+  }
+]
