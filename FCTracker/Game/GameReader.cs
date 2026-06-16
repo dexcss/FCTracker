@@ -117,6 +117,72 @@ public static unsafe class GameReader
 
     // Decode a null-terminated UTF8 string from a byte span (used for inline
     // struct strings that aren't declared with isString).
+    // Resolves a world name to a short region code (JP/NA/EU/OCE/CN/KR/CLD/TCN/DEV)
+    // via World -> DataCenter -> Region. Uses the region's Name string mapped through
+    // the requested aliases, with a RowId fallback.
+    public static string ResolveRegionCode(IDataManager data, string worldName)
+    {
+        if (string.IsNullOrEmpty(worldName)) return "";
+        try
+        {
+            var worlds = data.GetExcelSheet<Lumina.Excel.Sheets.World>();
+            if (worlds == null) return "";
+
+            foreach (var w in worlds)
+            {
+                if (!w.Name.ExtractText().Equals(worldName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var dcRef = w.DataCenter;
+                var regionId = (byte)dcRef.Value.Region.RowId; // RowRef -> row id
+
+                // Try the region's name string for the alias table.
+                var regionName = string.Empty;
+                try
+                {
+                    var dcGroup = data.GetExcelSheet<Lumina.Excel.Sheets.WorldDCGroupType>()
+                        ?.GetRowOrDefault((uint)regionId);
+                    if (dcGroup.HasValue) regionName = dcGroup.Value.Name.ExtractText();
+                }
+                catch { /* ignore */ }
+
+                return RegionAlias(regionName, regionId);
+            }
+        }
+        catch { /* ignore */ }
+        return "";
+    }
+
+    private static string RegionAlias(string regionName, byte regionId)
+    {
+        // Name-based aliases (as specified).
+        switch (regionName)
+        {
+            case "": break; // fall through to id map (empty name handled below)
+            case "Japan": return "JP";
+            case "North America": return "NA";
+            case "Europe": return "EU";
+            case "Oceania": return "OCE";
+            case "China": return "CN";
+            case "Korea": return "KR";
+            case "NA Cloud": return "CLD";
+            case "Traditional Chinese regions": return "TCN";
+        }
+
+        // Fallback by well-known region row ids.
+        return regionId switch
+        {
+            1 => "JP",
+            2 => "NA",
+            3 => "EU",
+            4 => "OCE",
+            5 => "CN",
+            6 => "KR",
+            7 => "CLD",
+            _ => string.IsNullOrEmpty(regionName) ? "DEV" : regionName,
+        };
+    }
+
     // Opens the Free Company window via its agent (AgentInterface.Show). Used by the
     // optional auto-open-on-login flow; the window is briefly visible on screen.
     public static void OpenFreeCompanyWindow()

@@ -349,6 +349,7 @@ public sealed class Plugin : IDalamudPlugin
             var prev = record.Fc;
 
             fc.Tag = GameReader.ReadLocalPlayerFcTag(local);
+            fc.Region = GameReader.ResolveRegionCode(DataManager, world);
 
             // Credits: hybrid read (AR credit-shop agent if open, else FC window).
             // When neither is available, carry forward the last known value.

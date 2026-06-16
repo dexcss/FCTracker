@@ -155,7 +155,7 @@ public class MainWindow : Window
     }
 
     // ---- Grouped by FC ----
-    private enum FcSortCol { World, Account, Name, Tag, Level, Subs, House, Credits }
+    private enum FcSortCol { Region, World, Account, Name, Tag, Level, Subs, House, Credits }
     private FcSortCol fcSort = FcSortCol.Name;
     private bool fcSortAsc = true;
     private ulong expandedFcId;
@@ -166,6 +166,7 @@ public class MainWindow : Window
         public ulong FcId;
         public string Name = "";
         public string Tag = "";
+        public string Region = "";
         public string World = "";
         public byte Level;
         public string Credits = "";
@@ -195,6 +196,7 @@ public class MainWindow : Window
                     FcId = fc?.FreeCompanyId ?? 0,
                     Name = fc?.Name ?? $"Not in an FC ({(string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName)})",
                     Tag = fc?.Tag ?? "",
+                    Region = fc?.Region ?? "",
                     World = c.WorldName,
                     Level = fc?.Rank ?? 0,
                     Credits = fc?.CreditsText ?? "",
@@ -221,7 +223,7 @@ public class MainWindow : Window
         SortFcGroups(groups);
 
         var cfg = plugin.Config;
-        var cols = 9;
+        var cols = 10;
         const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
             | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
 
@@ -231,6 +233,7 @@ public class MainWindow : Window
         // Frozen header row.
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Go", ImGuiTableColumnFlags.WidthFixed, 28 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("Region", ImGuiTableColumnFlags.WidthStretch, 0.7f);
         ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.1f);
         ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.1f);
         ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.2f);
@@ -243,6 +246,7 @@ public class MainWindow : Window
         ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
         ImGui.TableNextColumn(); // Go (no sort)
         ImGui.TextDisabled("");
+        DrawFcSortHeader(FcSortCol.Region, "Region");
         DrawFcSortHeader(FcSortCol.World, "World");
         DrawFcSortHeader(FcSortCol.Account, "Account");
         DrawFcSortHeader(FcSortCol.Name, "Free Company");
@@ -256,6 +260,19 @@ public class MainWindow : Window
             DrawFcRow(g, cfg);
 
         ImGui.EndTable();
+
+        // Expanded FC detail renders full-width BELOW the table so it isn't clipped
+        // into the first column.
+        if (expandedFcId != 0)
+        {
+            var open = groups.Find(x => x.FcId == expandedFcId);
+            if (open != null)
+            {
+                ImGuiHelpers.ScaledDummy(4f);
+                ImGui.Separator();
+                DrawFcDetail(open, cfg);
+            }
+        }
     }
 
     private void DrawFcSortHeader(FcSortCol col, string label)
@@ -265,7 +282,7 @@ public class MainWindow : Window
         if (ImGui.Selectable($"{label}{arrow}###fchdr{(int)col}"))
         {
             if (fcSort == col) fcSortAsc = !fcSortAsc;
-            else { fcSort = col; fcSortAsc = col is FcSortCol.World or FcSortCol.Account or FcSortCol.Name or FcSortCol.Tag; }
+            else { fcSort = col; fcSortAsc = col is FcSortCol.Region or FcSortCol.World or FcSortCol.Account or FcSortCol.Name or FcSortCol.Tag; }
         }
     }
 
@@ -273,6 +290,7 @@ public class MainWindow : Window
     {
         Comparison<FcGroup> cmp = fcSort switch
         {
+            FcSortCol.Region => (a, b) => string.Compare(a.Region, b.Region, StringComparison.OrdinalIgnoreCase),
             FcSortCol.World => (a, b) => string.Compare(a.World, b.World, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Account => (a, b) => string.Compare(AccountAliasLabel(a.SubRunnerAccountKey), AccountAliasLabel(b.SubRunnerAccountKey), StringComparison.OrdinalIgnoreCase),
             FcSortCol.Name => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
@@ -316,12 +334,16 @@ public class MainWindow : Window
             ImGui.TextDisabled("");
         }
 
-        // World (click to expand the FC).
+        // Region (click to expand the FC).
         ImGui.TableNextColumn();
         var tri = isOpen ? "\u25BC " : "\u25B6 ";
-        if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.World) ? "-" : g.World)}###fcrow{g.FcId}",
+        if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.Region) ? "-" : g.Region)}###fcrow{g.FcId}",
                 isOpen, ImGuiSelectableFlags.SpanAllColumns))
             expandedFcId = isOpen ? 0 : g.FcId;
+
+        // World
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(string.IsNullOrEmpty(g.World) ? "-" : g.World);
 
         // Account alias
         ImGui.TableNextColumn();
@@ -354,14 +376,6 @@ public class MainWindow : Window
         // Credits
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(string.IsNullOrEmpty(g.Credits) ? "-" : g.Credits);
-
-        // Expanded FC detail beneath the row.
-        if (isOpen)
-        {
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            DrawFcDetail(g, cfg);
-        }
     }
 
     private string AccountAliasLabel(string accountKey)
