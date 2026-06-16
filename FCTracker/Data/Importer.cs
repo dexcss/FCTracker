@@ -75,8 +75,6 @@ public static class Importer
 
                 var (rec, isNew) = GetOrCreateForImport(target, cid, name, world, "AutoRetainer");
 
-                // Never clobber a live record's FC snapshot, but we can add vessels
-                // or fill an empty FC.
                 if (fcId != 0)
                 {
                     var fcName = string.Empty;
@@ -88,6 +86,8 @@ public static class Importer
                         if (pts > 0) fcCreditsText = $"{pts:N0}";
                     }
 
+                    // Never clobber a live record's FC snapshot, but we can fill an
+                    // empty/imported one.
                     if (rec.Source != "Live" && (rec.Fc == null || rec.Fc.Source != "Live"))
                     {
                         rec.Fc ??= new FreeCompanySnapshot();
@@ -97,12 +97,25 @@ public static class Importer
                         rec.Fc.Source = "AutoRetainer";
                         if (rec.FirstSeenFcId == 0) rec.FirstSeenFcId = fcId;
                     }
-                }
 
-                // Vessels: OfflineAirshipData / OfflineSubmarineData (name + timers).
-                ImportArVessels(ch["OfflineAirshipData"] as JArray, rec.Airships, res);
-                ImportArVessels(ch["OfflineSubmarineData"] as JArray, rec.Submersibles, res);
-                rec.VesselsLastUpdatedUtc ??= DateTime.UtcNow;
+                    // Vessels are only meaningful while in the FC.
+                    ImportArVessels(ch["OfflineAirshipData"] as JArray, rec.Airships, res);
+                    ImportArVessels(ch["OfflineSubmarineData"] as JArray, rec.Submersibles, res);
+                    rec.VesselsLastUpdatedUtc ??= DateTime.UtcNow;
+                }
+                else
+                {
+                    // Character is NOT currently in an FC (e.g. left, but AR still
+                    // keeps them assigned to subs for a future rejoin). Don't carry
+                    // a stale FC tag or "has subs" state for an imported record.
+                    if (rec.Source != "Live" && (rec.Fc == null || rec.Fc.Source != "Live"))
+                    {
+                        rec.Fc = null;
+                        rec.Airships.Clear();
+                        rec.Submersibles.Clear();
+                        rec.VesselsLastUpdatedUtc = null;
+                    }
+                }
 
                 if (isNew) res.CharactersAdded++; else res.CharactersUpdated++;
             }

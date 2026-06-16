@@ -20,17 +20,6 @@ Open the window with `/fctracker` (alias `/fct`).
 2. Add: `https://raw.githubusercontent.com/dexcss/FCTracker/main/repo.json`
 3. Save, then find "FC Tracker" in the plugin installer.
 
-## Building from source
-
-Requires the .NET 10 SDK and Dalamud (via XIVLauncher). From the repo root:
-
-```
-dotnet build FCTracker/FCTracker.csproj -c Release
-```
-
-The plugin is built against `Dalamud.NET.Sdk/15.0.0` (API 15). `Microsoft.Data.Sqlite`
-is used only to read Submarine Tracker's database during import.
-
 ## Notes
 
 - "First Registered" is the first time this plugin saw the character in the FC, not a

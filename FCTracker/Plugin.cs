@@ -1,4 +1,6 @@
 using System;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.Command;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -21,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
+    [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
     private const string CommandName = "/fctracker";
@@ -30,6 +33,11 @@ public sealed class Plugin : IDalamudPlugin
     public SharedStore? Store { get; private set; }
     private readonly WindowSystem windowSystem = new("FCTracker");
     private readonly MainWindow mainWindow;
+    private readonly SettingsWindow settingsWindow;
+
+    // The Dalamud roaming path this client runs under — used to tag characters by
+    // account. Independent of which character is logged in.
+    public string AccountKey { get; }
 
     private DateTime lastPoll = DateTime.MinValue;
     private DateTime lastSharedRefresh = DateTime.MinValue;
@@ -41,10 +49,17 @@ public sealed class Plugin : IDalamudPlugin
         Config = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         Config.Initialize(PluginInterface);
 
+        // The plugin config directory sits under the active roaming path; its parent
+        // chain identifies the account/client. We use the configfile's directory
+        // root as a stable key per roaming path.
+        AccountKey = ComputeAccountKey();
+
         InitStore();
 
         mainWindow = new MainWindow(this);
+        settingsWindow = new SettingsWindow(this);
         windowSystem.AddWindow(mainWindow);
+        windowSystem.AddWindow(settingsWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -57,20 +72,44 @@ public sealed class Plugin : IDalamudPlugin
 
         PluginInterface.UiBuilder.Draw += windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi += OpenMain;
-        PluginInterface.UiBuilder.OpenConfigUi += OpenMain;
+        PluginInterface.UiBuilder.OpenConfigUi += OpenSettings;
         Framework.Update += OnUpdate;
+
+        // House-winner auto-detect: when the lottery results SelectYesno appears
+        // after a housing placard, check for a "Congratulations" payload.
+        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesno);
     }
 
     public void Dispose()
     {
+        AddonLifecycle.UnregisterListener(OnSelectYesno);
         Framework.Update -= OnUpdate;
         PluginInterface.UiBuilder.Draw -= windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
-        PluginInterface.UiBuilder.OpenConfigUi -= OpenMain;
+        PluginInterface.UiBuilder.OpenConfigUi -= OpenSettings;
         windowSystem.RemoveAllWindows();
         CommandManager.RemoveHandler(CommandName);
         CommandManager.RemoveHandler(CommandAlias);
     }
+
+    private static string ComputeAccountKey()
+    {
+        try
+        {
+            // e.g. ...\XIVLauncher\pluginConfigs  (or a custom --roamingPath root).
+            var dir = PluginInterface.GetPluginConfigDirectory();
+            // Two levels up from pluginConfigs\FCTracker is the roaming root.
+            var pluginConfigs = System.IO.Directory.GetParent(dir)?.FullName ?? dir;
+            var roamingRoot = System.IO.Directory.GetParent(pluginConfigs)?.FullName ?? pluginConfigs;
+            return roamingRoot;
+        }
+        catch
+        {
+            return "default";
+        }
+    }
+
+    public void OpenSettings() => settingsWindow.IsOpen = true;
 
     private void OpenMain() => mainWindow.IsOpen = true;
 
@@ -216,6 +255,7 @@ public sealed class Plugin : IDalamudPlugin
         var name = local.Name.TextValue;
         var world = local.HomeWorld.Value.Name.ExtractText();
         var record = Config.GetOrCreate(contentId, name, world);
+        record.AccountKey = AccountKey; // roaming path this client runs under
 
         var changed = false;
 
@@ -227,10 +267,9 @@ public sealed class Plugin : IDalamudPlugin
 
             fc.Tag = GameReader.ReadLocalPlayerFcTag(local);
 
-            // Credits: only the FC window exposes this. When the window is closed the
-            // scraper returns empty, so carry forward the last known value rather than
-            // blanking it. A fresh successful read overwrites it (credits change).
-            var credits = AddonScraper.TryScrapeFcCredits(GameGui, fc.Rank, fc.OnlineMembers, fc.TotalMembers);
+            // Credits: hybrid read (AR credit-shop agent if open, else FC window).
+            // When neither is available, carry forward the last known value.
+            var credits = AddonScraper.TryReadFcCredits(GameGui, fc.Rank, fc.OnlineMembers, fc.TotalMembers);
             if (!string.IsNullOrEmpty(credits))
                 fc.CreditsText = credits;
             else if (prev != null && !string.IsNullOrEmpty(prev.CreditsText) && prev.FreeCompanyId == fc.FreeCompanyId)
@@ -264,5 +303,44 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         if (changed) PersistCharacter(record);
+    }
+
+    // House-winner auto-detect. When you win a housing lottery, interacting with the
+    // results placard opens HousingSignBoard, then a SelectYesno whose prompt text
+    // contains "Congratulations". If we see that while a housing addon is open, we
+    // record the current character as the house winner for their FC.
+    private void OnSelectYesno(AddonEvent type, AddonArgs args)
+    {
+        try
+        {
+            // Only meaningful right after a housing placard.
+            var signboardOpen = GameGui.GetAddonByName("HousingSignBoard", 1) != nint.Zero;
+            if (!signboardOpen) return;
+
+            var text = GameReader.ReadSelectYesnoPrompt(args.Addon);
+            if (string.IsNullOrEmpty(text)) return;
+            if (text.IndexOf("Congratulations", StringComparison.OrdinalIgnoreCase) < 0) return;
+
+            var contentId = PlayerState.ContentId;
+            if (contentId == 0) return;
+            var rec = Config.Characters.Find(x => x.ContentId == contentId);
+            if (rec == null) return;
+
+            var winner = string.IsNullOrEmpty(rec.WorldName)
+                ? rec.CharacterName
+                : $"{rec.CharacterName} @ {rec.WorldName}";
+
+            // Only set if empty (don't overwrite a manual entry).
+            if (string.IsNullOrEmpty(rec.ManualHouseWinner))
+            {
+                rec.ManualHouseWinner = $"{winner} (auto-detected {DateTime.Now:yyyy-MM-dd})";
+                PersistCharacter(rec);
+                Log.Info($"FC Tracker: auto-recorded house winner for {winner}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "FC Tracker house-winner detect failed");
+        }
     }
 }

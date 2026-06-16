@@ -32,9 +32,10 @@ public class MainWindow : Window
 
     // Which character row is expanded (0 = none).
     private ulong expandedCid;
+    private string search = string.Empty;
 
     // Current sort state.
-    private enum SortCol { Character, FreeCompany, Tag, Level, House, Subs, Credits }
+    private enum SortCol { Character, World, FreeCompany, Tag, Level, House, Subs, Credits }
     private SortCol sortColumn = SortCol.Character;
     private bool sortAscending = true;
 
@@ -42,85 +43,172 @@ public class MainWindow : Window
     {
         var config = plugin.Config;
 
-        DrawSettings(config);
+        // Top bar: search + gear (settings) on the right.
+        DrawTopBar(config);
 
         if (config.Characters.Count == 0)
         {
             ImGui.TextWrapped(
                 "No data yet. Log into a character that is in a Free Company. " +
-                "Open the Free Company window to capture rank/credits, and " +
+                "Open the Free Company window to capture level/credits, and " +
                 "stand in your FC workshop to capture airships and submersibles.");
             return;
         }
 
-        var rows = SortRows(config.Characters);
+        var filtered = Filter(config.Characters);
 
-        const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
-            | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp;
+        if (config.GroupByFc)
+            DrawGrouped(filtered);
+        else
+            DrawFlat(filtered);
 
-        if (ImGui.BeginTable("##fctable", 7, flags))
+        ApplyPendingActions();
+    }
+
+    private void DrawTopBar(Configuration config)
+    {
+        // Counts.
+        var fcIds = new System.Collections.Generic.HashSet<ulong>();
+        var houses = 0;
+        foreach (var c in config.Characters)
         {
-            ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch, 2.2f);
-            ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.4f);
+            if (c.Fc != null && c.Fc.FreeCompanyId != 0) fcIds.Add(c.Fc.FreeCompanyId);
+            if (c.Fc?.House != null && c.Fc.House.HasHouse) houses++;
+        }
+
+        ImGui.TextDisabled($"{config.Characters.Count} characters · {fcIds.Count} FCs · {houses} houses");
+
+        // Gear button, right-aligned.
+        var gear = "Settings";
+        var gearW = ImGui.CalcTextSize(gear).X + ImGui.GetStyle().FramePadding.X * 2;
+        ImGui.SameLine(ImGui.GetContentRegionAvail().X - gearW);
+        if (ImGui.SmallButton(gear))
+            plugin.OpenSettings();
+
+        // Search bar.
+        ImGui.SetNextItemWidth(-1);
+        ImGui.InputTextWithHint("##search", "Search character, FC, tag, or world (e.g. \"ultr\")...", ref search, 64);
+        ImGuiHelpers.ScaledDummy(2f);
+    }
+
+    private System.Collections.Generic.List<CharacterRecord> Filter(
+        System.Collections.Generic.List<CharacterRecord> src)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+            return SortRows(src);
+
+        var q = search.Trim();
+        var outList = new System.Collections.Generic.List<CharacterRecord>();
+        foreach (var c in src)
+        {
+            var hay = $"{c.CharacterName} {c.WorldName} {c.Fc?.Name} {c.Fc?.Tag}";
+            if (hay.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+                outList.Add(c);
+        }
+        return SortRows(outList);
+    }
+
+    // ---- Flat list (default) ----
+    private void DrawFlat(System.Collections.Generic.List<CharacterRecord> rows)
+    {
+        var cols = plugin.Config.ShowAccountColumn ? 9 : 8;
+        const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
+            | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
+
+        if (ImGui.BeginTable("##fctable", cols, flags))
+        {
+            ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch, 2.0f);
+            ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+            ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.2f);
             ImGui.TableSetupColumn("Tag", ImGuiTableColumnFlags.WidthStretch, 0.8f);
             ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthStretch, 0.7f);
             ImGui.TableSetupColumn("House", ImGuiTableColumnFlags.WidthStretch, 0.6f);
             ImGui.TableSetupColumn("Subs", ImGuiTableColumnFlags.WidthStretch, 0.6f);
             ImGui.TableSetupColumn("Credits", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+            if (plugin.Config.ShowAccountColumn)
+                ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.0f);
 
-            // Custom clickable header row (so we control sort cycling/arrows
-            // without depending on the binding's sort-spec struct shape).
             ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
             DrawSortHeader(SortCol.Character, "Character");
+            DrawSortHeader(SortCol.World, "World");
             DrawSortHeader(SortCol.FreeCompany, "Free Company");
             DrawSortHeader(SortCol.Tag, "Tag");
             DrawSortHeader(SortCol.Level, "Level");
             DrawSortHeader(SortCol.House, "House");
             DrawSortHeader(SortCol.Subs, "Subs");
             DrawSortHeader(SortCol.Credits, "Credits");
+            if (plugin.Config.ShowAccountColumn)
+            {
+                ImGui.TableNextColumn();
+                ImGui.TextDisabled("Account");
+            }
 
             foreach (var c in rows)
                 DrawCharacterRow(c);
 
             ImGui.EndTable();
         }
+    }
 
-        // Expanded detail renders full-width below the table (so it isn't clipped to
-        // the first column). Only one row is expanded at a time.
-        if (expandedCid != 0)
+    // ---- Grouped by FC ----
+    private void DrawGrouped(System.Collections.Generic.List<CharacterRecord> rows)
+    {
+        // Bucket by FC name (characters with no FC go under "Not in an FC").
+        var groups = new System.Collections.Generic.SortedDictionary<string,
+            System.Collections.Generic.List<CharacterRecord>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var c in rows)
         {
-            var expanded = config.Characters.Find(x => x.ContentId == expandedCid);
-            if (expanded != null)
-            {
-                ImGuiHelpers.ScaledDummy(4f);
-                ImGui.Separator();
-                DrawCharacterDetail(expanded);
-            }
+            var key = c.Fc != null && !string.IsNullOrEmpty(c.Fc.Name) ? c.Fc.Name : "Not in an FC";
+            if (!groups.TryGetValue(key, out var list))
+                groups[key] = list = new();
+            list.Add(c);
         }
 
-        ApplyPendingActions();
+        foreach (var g in groups)
+        {
+            var first = g.Value[0].Fc;
+            var header = first != null && !string.IsNullOrEmpty(first.Tag)
+                ? $"{g.Key}  «{first.Tag}»  ({g.Value.Count})"
+                : $"{g.Key}  ({g.Value.Count})";
+
+            if (ImGui.CollapsingHeader($"{header}###grp{g.Key}"))
+            {
+                ImGui.Indent(16 * ImGuiHelpers.GlobalScale);
+                foreach (var c in g.Value)
+                {
+                    var name = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+                    var tri = expandedCid == c.ContentId ? "\u25BC " : "\u25B6 "; // ▼ / ▶
+                    if (ImGui.Selectable($"{tri}{name}###grow{c.ContentId}", expandedCid == c.ContentId))
+                        expandedCid = expandedCid == c.ContentId ? 0 : c.ContentId;
+                    if (expandedCid == c.ContentId)
+                    {
+                        ImGui.Indent(12 * ImGuiHelpers.GlobalScale);
+                        DrawCharacterDetail(c);
+                        ImGui.Unindent(12 * ImGuiHelpers.GlobalScale);
+                    }
+                }
+                ImGui.Unindent(16 * ImGuiHelpers.GlobalScale);
+            }
+        }
     }
 
     private void DrawSortHeader(SortCol col, string label)
     {
         ImGui.TableNextColumn();
-        var arrow = sortColumn == col ? (sortAscending ? " ^" : " v") : "";
+        var arrow = sortColumn == col ? (sortAscending ? " \u25B2" : " \u25BC") : ""; // ▲ / ▼
         if (ImGui.Selectable($"{label}{arrow}###hdr{(int)col}"))
         {
             if (sortColumn == col)
-            {
                 sortAscending = !sortAscending;
-            }
             else
             {
                 sortColumn = col;
-                // Text columns default A→Z (ascending). Level/House/Subs/Credits
-                // default to the "high" side first (highest level, Yes, most credits).
-                sortAscending = col is SortCol.Character or SortCol.FreeCompany or SortCol.Tag;
+                // Text columns default A→Z; numeric/boolean default to "high" first.
+                sortAscending = col is SortCol.Character or SortCol.World or SortCol.FreeCompany or SortCol.Tag;
             }
         }
     }
-
 
     private System.Collections.Generic.List<CharacterRecord> SortRows(
         System.Collections.Generic.List<CharacterRecord> src)
@@ -130,6 +218,7 @@ public class MainWindow : Window
         Comparison<CharacterRecord> cmp = sortColumn switch
         {
             SortCol.Character => (a, b) => string.Compare(a.CharacterName, b.CharacterName, StringComparison.OrdinalIgnoreCase),
+            SortCol.World => (a, b) => string.Compare(a.WorldName, b.WorldName, StringComparison.OrdinalIgnoreCase),
             SortCol.FreeCompany => (a, b) => string.Compare(a.Fc?.Name ?? "", b.Fc?.Name ?? "", StringComparison.OrdinalIgnoreCase),
             SortCol.Tag => (a, b) => string.Compare(a.Fc?.Tag ?? "", b.Fc?.Tag ?? "", StringComparison.OrdinalIgnoreCase),
             SortCol.Level => (a, b) => (a.Fc?.Rank ?? 0).CompareTo(b.Fc?.Rank ?? 0),
@@ -147,14 +236,12 @@ public class MainWindow : Window
         return list;
     }
 
-    // House: Yes(2) > No(1) > unknown(0). Ascending shows No→Yes; descending Yes→No.
     private static int HouseSortValue(CharacterRecord c)
     {
         if (c.Fc?.House == null) return 0;
         return c.Fc.House.HasHouse ? 2 : 1;
     }
 
-    // Subs: has subs(2) > none(1) > not checked(0).
     private static int SubsSortValue(CharacterRecord c)
     {
         if (c.VesselsLastUpdatedUtc == null) return 0;
@@ -169,6 +256,14 @@ public class MainWindow : Window
         return long.TryParse(cleaned, out var v) ? v : -1;
     }
 
+    private string AccountLabel(CharacterRecord c)
+    {
+        if (string.IsNullOrEmpty(c.AccountKey)) return "-";
+        return plugin.Config.AccountAliases.TryGetValue(c.AccountKey, out var alias) && !string.IsNullOrEmpty(alias)
+            ? alias
+            : "(unnamed)";
+    }
+
     private void DrawCharacterRow(CharacterRecord c)
     {
         var fc = c.Fc;
@@ -176,14 +271,17 @@ public class MainWindow : Window
 
         ImGui.TableNextRow();
 
-        // Character (with server) — clickable to expand.
+        // Character — clickable triangle to expand.
         ImGui.TableNextColumn();
-        var arrow = isExpanded ? "v " : "> ";
+        var tri = isExpanded ? "\u25BC " : "\u25B6 "; // ▼ / ▶
         var charName = string.IsNullOrEmpty(c.CharacterName) ? c.ContentId.ToString() : c.CharacterName;
-        var charLabel = string.IsNullOrEmpty(c.WorldName) ? charName : $"{charName} @ {c.WorldName}";
-        if (ImGui.Selectable($"{arrow}{charLabel}###row{c.ContentId}", isExpanded,
+        if (ImGui.Selectable($"{tri}{charName}###row{c.ContentId}", isExpanded,
                 ImGuiSelectableFlags.SpanAllColumns))
             expandedCid = isExpanded ? 0 : c.ContentId;
+
+        // World
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(string.IsNullOrEmpty(c.WorldName) ? "-" : c.WorldName);
 
         // Free Company
         ImGui.TableNextColumn();
@@ -218,16 +316,29 @@ public class MainWindow : Window
         // Credits
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(fc != null && !string.IsNullOrEmpty(fc.CreditsText) ? fc.CreditsText : "-");
+
+        // Account (optional)
+        if (plugin.Config.ShowAccountColumn)
+        {
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(AccountLabel(c));
+        }
+
+        // Per-row expanded detail, directly beneath this row (spans full width).
+        if (isExpanded)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            DrawCharacterDetail(c);
+        }
     }
-
-
-
 
     private void ApplyPendingActions()
     {
         if (pendingDeleteCid != 0)
         {
             plugin.DeleteCharacter(pendingDeleteCid);
+            if (expandedCid == pendingDeleteCid) expandedCid = 0;
             pendingDeleteCid = 0;
         }
         if (pendingClearFcCid != 0)
@@ -239,88 +350,6 @@ public class MainWindow : Window
         {
             plugin.ClearAll();
             pendingClearAll = false;
-        }
-    }
-
-    private void DrawSettings(Configuration config)
-    {
-        if (!ImGui.CollapsingHeader("Settings###settings"))
-            return;
-
-        var shared = config.UseSharedStorage;
-        if (ImGui.Checkbox("Share data across all clients (same Windows user)", ref shared))
-        {
-            config.UseSharedStorage = shared;
-            config.Save();
-            plugin.InitStore();
-        }
-        ImGui.TextDisabled("Reads/writes a single file under %APPDATA%, independent of --roamingPath. " +
-                           "Multi-client safe (merged per character).");
-
-        if (config.UseSharedStorage && plugin.Store != null)
-        {
-            ImGui.TextDisabled($"Path: {plugin.Store.Path_}");
-        }
-
-        var ov = config.SharedStoragePathOverride;
-        if (ImGui.InputText("Path override (optional)###pathoverride", ref ov, 512))
-        {
-            config.SharedStoragePathOverride = ov;
-            config.Save();
-        }
-        if (ImGui.IsItemDeactivatedAfterEdit())
-            plugin.InitStore();
-        ImGui.TextDisabled("Leave empty for the default. Point at a synced/network folder to share across machines.");
-
-        ImGui.Separator();
-        DrawImport(config);
-
-        ImGui.Separator();
-        if (ImGui.Button("Clear ALL tracked data") && ImGui.GetIO().KeyCtrl)
-            pendingClearAll = true;
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Ctrl-click to wipe every tracked character and FC. Cannot be undone.");
-
-        ImGui.Separator();
-    }
-
-    private string importSummary = string.Empty;
-
-    private void DrawImport(Configuration config)
-    {
-        ImGui.TextUnformatted("Import existing data");
-        ImGui.TextDisabled("Pulls FC and vessel data already collected by other plugins. " +
-                           "Your own live data is never overwritten.");
-
-        var arPath = config.AutoRetainerConfigPath;
-        if (ImGui.InputTextWithHint("AutoRetainer config###arpath",
-                Importer.DefaultAutoRetainerConfig(), ref arPath, 512))
-        {
-            config.AutoRetainerConfigPath = arPath;
-            config.Save();
-        }
-
-        var stPath = config.SubmarineTrackerDbPath;
-        if (ImGui.InputTextWithHint("SubmarineTracker db###stpath",
-                Importer.DefaultSubmarineTrackerDb(), ref stPath, 512))
-        {
-            config.SubmarineTrackerDbPath = stPath;
-            config.Save();
-        }
-
-        if (ImGui.Button("Import from AutoRetainer"))
-            importSummary = plugin.RunImport(autoRetainer: true, submarineTracker: false);
-        ImGui.SameLine();
-        if (ImGui.Button("Import from SubmarineTracker"))
-            importSummary = plugin.RunImport(autoRetainer: false, submarineTracker: true);
-        ImGui.SameLine();
-        if (ImGui.Button("Import both"))
-            importSummary = plugin.RunImport(autoRetainer: true, submarineTracker: true);
-
-        if (!string.IsNullOrEmpty(importSummary))
-        {
-            ImGui.TextDisabled("Result:");
-            ImGui.TextWrapped(importSummary);
         }
     }
 

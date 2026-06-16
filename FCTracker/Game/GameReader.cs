@@ -117,6 +117,26 @@ public static unsafe class GameReader
 
     // Decode a null-terminated UTF8 string from a byte span (used for inline
     // struct strings that aren't declared with isString).
+    // Reads the prompt text from a SelectYesno addon (used for house-winner detect).
+    public static string ReadSelectYesnoPrompt(nint addonPtr)
+    {
+        if (addonPtr == nint.Zero) return string.Empty;
+        var addon = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)addonPtr;
+        if (addon == null) return string.Empty;
+
+        // SelectYesno's prompt is a text node; scan for the first non-empty one.
+        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+        {
+            var node = addon->UldManager.NodeList[i];
+            if (node == null || node->Type != FFXIVClientStructs.FFXIV.Component.GUI.NodeType.Text)
+                continue;
+            var t = ((FFXIVClientStructs.FFXIV.Component.GUI.AtkTextNode*)node)->NodeText.ToString();
+            if (!string.IsNullOrWhiteSpace(t) && t.Length > 10)
+                return t;
+        }
+        return string.Empty;
+    }
+
     private static string DecodeCString(ReadOnlySpan<byte> span)
     {
         var len = span.IndexOf((byte)0);

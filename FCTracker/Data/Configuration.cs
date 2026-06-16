@@ -28,6 +28,16 @@ public class Configuration : IPluginConfiguration
     public string AutoRetainerConfigPath = string.Empty;
     public string SubmarineTrackerDbPath = string.Empty;
 
+    // View options.
+    public bool GroupByFc = false;          // false = flat character list (default)
+    public bool ShowAccountColumn = false;  // optional account-alias column/tag
+
+    // Account aliases: maps a detected Dalamud roaming path -> a friendly name the
+    // user assigns (e.g. "Main", "Alt box"). The plugin auto-detects the path it is
+    // running under; the alias itself is user-entered (the launcher's account label
+    // isn't exposed to plugins).
+    public Dictionary<string, string> AccountAliases = new();
+
     [NonSerialized] private IDalamudPluginInterface? pluginInterface;
 
     public void Initialize(IDalamudPluginInterface pi) => pluginInterface = pi;
