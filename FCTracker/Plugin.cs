@@ -74,6 +74,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi += OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi += OpenSettings;
         Framework.Update += OnUpdate;
+        ClientState.Login += OnLogin;
 
         // House-winner auto-detect: when the lottery results SelectYesno appears
         // after a housing placard, check for a "Congratulations" payload.
@@ -84,6 +85,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         AddonLifecycle.UnregisterListener(OnSelectYesno);
         Framework.Update -= OnUpdate;
+        ClientState.Login -= OnLogin;
         PluginInterface.UiBuilder.Draw -= windowSystem.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= OpenMain;
         PluginInterface.UiBuilder.OpenConfigUi -= OpenSettings;
@@ -224,9 +226,84 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    // Enrich records with AutoRetainer service-account info for ALL registered
+    // characters (not just the logged-in one), so account aliases resolve even for
+    // alts not currently online. Throttled by the caller. Best-effort.
+    private DateTime lastArEnrich = DateTime.MinValue;
+    public void EnrichFromAutoRetainer(bool force = false)
+    {
+        if (!force && DateTime.UtcNow - lastArEnrich < TimeSpan.FromSeconds(30)) return;
+        lastArEnrich = DateTime.UtcNow;
+
+        try
+        {
+            if (!PluginIpc.IsAutoRetainerAvailable()) return;
+            var cids = PluginIpc.GetRegisteredCharacters();
+            var dirty = false;
+            foreach (var cid in cids)
+            {
+                var info = PluginIpc.GetArCharInfo(cid);
+                if (info == null) continue;
+                var rec = Config.Characters.Find(x => x.ContentId == cid);
+                if (rec == null) continue; // only enrich characters we already track
+                if (rec.IsWorkshopRunner != info.WorkshopEnabled)
+                {
+                    rec.IsWorkshopRunner = info.WorkshopEnabled;
+                    dirty = true;
+                }
+            }
+            if (dirty && Store == null) Config.Save();
+        }
+        catch (Exception ex) { Log.Error(ex, "FC Tracker AR enrich failed"); }
+    }
+
+    private DateTime pendingFcOpenAt = DateTime.MaxValue;
+
+    private void OnLogin()
+    {
+        // Reset per-login timers so the poll re-reads fresh.
+        lastArEnrich = DateTime.MinValue;
+
+        if (!Config.AutoOpenFcOnLogin) return;
+
+        // Only when AutoRetainer multimode is enabled (confirmed IPC).
+        if (!PluginIpc.GetMultiModeEnabled()) return;
+
+        // Defer the open a few seconds so the world/UI settles after login.
+        pendingFcOpenAt = DateTime.UtcNow.AddSeconds(8);
+    }
+
+    private void TryScheduledFcOpen()
+    {
+        if (DateTime.UtcNow < pendingFcOpenAt) return;
+        pendingFcOpenAt = DateTime.MaxValue; // one-shot
+
+        try
+        {
+            // Don't fight a cutscene/loading; only open if we're in a normal state.
+            if (!ClientState.IsLoggedIn) return;
+            GameReader.OpenFreeCompanyWindow();
+            // The next normal Poll will read it; we close it shortly after.
+            pendingFcCloseAt = DateTime.UtcNow.AddSeconds(3);
+        }
+        catch (Exception ex) { Log.Error(ex, "FC auto-open failed"); }
+    }
+
+    private DateTime pendingFcCloseAt = DateTime.MaxValue;
+    private void TryScheduledFcClose()
+    {
+        if (DateTime.UtcNow < pendingFcCloseAt) return;
+        pendingFcCloseAt = DateTime.MaxValue;
+        try { GameReader.CloseFreeCompanyWindow(GameGui); }
+        catch (Exception ex) { Log.Error(ex, "FC auto-close failed"); }
+    }
+
     private void OnUpdate(IFramework framework)
     {
         if (!ClientState.IsLoggedIn) return;
+
+        TryScheduledFcOpen();
+        TryScheduledFcClose();
 
         // Periodically re-read the shared file so this client sees other clients'
         // updates (their characters, their latest vessel timers, etc).
@@ -256,6 +333,12 @@ public sealed class Plugin : IDalamudPlugin
         var world = local.HomeWorld.Value.Name.ExtractText();
         var record = Config.GetOrCreate(contentId, name, world);
         record.AccountKey = AccountKey; // roaming path this client runs under
+
+        // Pull AutoRetainer's workshop-runner flag for this character (defines the
+        // FC's sub-runner). Best-effort; no-op if AR isn't loaded.
+        var ar = PluginIpc.GetArCharInfo(contentId);
+        if (ar != null)
+            record.IsWorkshopRunner = ar.WorkshopEnabled;
 
         var changed = false;
 

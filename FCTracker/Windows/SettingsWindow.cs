@@ -72,56 +72,54 @@ public class SettingsWindow : Window
         // --- Accounts ---
         ImGui.TextUnformatted("Accounts");
         ImGui.Separator();
-        ImGui.TextWrapped("Each game client runs under a Dalamud roaming path. The plugin " +
-                          "auto-detects the path; give it a friendly alias here. (The launcher's " +
-                          "account name isn't available to plugins, so the alias is yours to set.)");
+        ImGui.TextWrapped("Each game client runs under a Dalamud roaming path (one per game account). " +
+                          "Give each detected path a friendly alias; it shows in the Account column and " +
+                          "for each FC's sub-runner.");
 
-        ImGui.TextDisabled($"This client's path: {plugin.AccountKey}");
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Add alias for this client"))
+        // Gather distinct roaming paths across tracked characters, plus this client's.
+        var paths = new System.Collections.Generic.SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(plugin.AccountKey)) paths.Add(plugin.AccountKey);
+        foreach (var c in config.Characters)
+            if (!string.IsNullOrEmpty(c.AccountKey)) paths.Add(c.AccountKey);
+
+        if (paths.Count == 0)
         {
-            if (!config.AccountAliases.ContainsKey(plugin.AccountKey))
-            {
-                config.AccountAliases[plugin.AccountKey] = "My account";
-                config.Save();
-            }
+            ImGui.TextDisabled("No accounts detected yet. Log into characters to populate them.");
         }
-
-        if (config.AccountAliases.Count > 0)
+        else if (ImGui.BeginTable("##aliases", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
-            if (ImGui.BeginTable("##aliases", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            ImGui.TableSetupColumn("Roaming path");
+            ImGui.TableSetupColumn("Alias", ImGuiTableColumnFlags.WidthFixed, 180 * ImGuiHelpers.GlobalScale);
+            ImGui.TableHeadersRow();
+
+            foreach (var path in paths)
             {
-                ImGui.TableSetupColumn("Roaming path");
-                ImGui.TableSetupColumn("Alias", ImGuiTableColumnFlags.WidthFixed, 180 * ImGuiHelpers.GlobalScale);
-                ImGui.TableHeadersRow();
-
-                string? removeKey = null;
-                foreach (var kv in config.AccountAliases)
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                var thisOne = path == plugin.AccountKey ? " (this client)" : "";
+                ImGui.TextWrapped(path + thisOne);
+                ImGui.TableNextColumn();
+                config.AccountAliases.TryGetValue(path, out var alias);
+                alias ??= string.Empty;
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.InputText($"###alias{path.GetHashCode()}", ref alias, 64))
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextWrapped(kv.Key);
-                    ImGui.TableNextColumn();
-                    var alias = kv.Value;
-                    ImGui.SetNextItemWidth(-1);
-                    if (ImGui.InputText($"###alias{kv.Key.GetHashCode()}", ref alias, 64))
-                    {
-                        config.AccountAliases[kv.Key] = alias;
-                        config.Save();
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"x###rm{kv.Key.GetHashCode()}"))
-                        removeKey = kv.Key;
-                }
-                ImGui.EndTable();
-
-                if (removeKey != null)
-                {
-                    config.AccountAliases.Remove(removeKey);
+                    config.AccountAliases[path] = alias;
                     config.Save();
                 }
             }
+            ImGui.EndTable();
         }
+
+        ImGuiHelpers.ScaledDummy(4f);
+        var autoOpen = config.AutoOpenFcOnLogin;
+        if (ImGui.Checkbox("Auto-open FC window on login when AutoRetainer multimode is on", ref autoOpen))
+        {
+            config.AutoOpenFcOnLogin = autoOpen;
+            config.Save();
+        }
+        ImGui.TextDisabled("Briefly opens (and closes) the FC window a few seconds after login to refresh " +
+                           "level/credits/house. The window flickers on screen when this fires. Off by default.");
 
         ImGuiHelpers.ScaledDummy(6f);
 

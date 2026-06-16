@@ -155,9 +155,13 @@ public class CharacterRecord
     public string Source = "Live";
     public DateTime? ImportedAtUtc;
 
-    // The Dalamud roaming path this character was last seen under (used to group/
-    // label by account). Empty for imported records until seen live.
+    // The Dalamud roaming path this character was last seen under (used to map the
+    // subrunner to an account alias). Empty for imported records until seen live.
     public string AccountKey = string.Empty;
+
+    // From AutoRetainer: does this character have WorkshopEnabled set (i.e. it's the
+    // FC's sub-runner)? Read via IPC; defaults false.
+    public bool IsWorkshopRunner = false;
 
     // The character's own rank within the FC (e.g. "Master", "Officer"). Not in any
     // clean struct — only captured by an optional, best-effort scrape of the FC

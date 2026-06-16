@@ -43,6 +43,9 @@ public class MainWindow : Window
     {
         var config = plugin.Config;
 
+        // Opportunistically pull AutoRetainer service-account info for tracked chars.
+        plugin.EnrichFromAutoRetainer();
+
         // Top bar: search + gear (settings) on the right.
         DrawTopBar(config);
 
@@ -151,98 +154,307 @@ public class MainWindow : Window
     }
 
     // ---- Grouped by FC ----
+    private enum FcSortCol { World, Account, Name, Tag, Level, Subs, House, Credits }
+    private FcSortCol fcSort = FcSortCol.Name;
+    private bool fcSortAsc = true;
+    private ulong expandedFcId;
+
+    // A grouped FC entry built from one or more of the user's characters.
+    private class FcGroup
+    {
+        public ulong FcId;
+        public string Name = "";
+        public string Tag = "";
+        public string World = "";
+        public byte Level;
+        public string Credits = "";
+        public HouseRecord? House;
+        public int SubCount;          // best subs count among members
+        public bool SubsKnown;
+        public string SubRunnerAccountKey = ""; // roaming path of the WorkshopEnabled char
+        public string SubRunnerName = "";
+        public System.Collections.Generic.List<CharacterRecord> Members = new();
+    }
+
     private void DrawGrouped(System.Collections.Generic.List<CharacterRecord> rows)
     {
-        var cfg = plugin.Config;
-
-        // Bucket by FC id (fall back to name). Characters with no FC go under a
-        // per-world "Not in an FC" bucket.
-        var groups = new System.Collections.Generic.Dictionary<string,
-            System.Collections.Generic.List<CharacterRecord>>();
-
+        // Build FC groups keyed by FCID (fall back to name for safety).
+        var map = new System.Collections.Generic.Dictionary<string, FcGroup>();
         foreach (var c in rows)
         {
-            string key;
-            if (c.Fc != null && !string.IsNullOrEmpty(c.Fc.Name))
-                key = c.Fc.Name;
-            else
-                key = $"Not in an FC ({(string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName)})";
+            var fc = c.Fc;
+            var key = fc != null && fc.FreeCompanyId != 0 ? fc.FreeCompanyId.ToString()
+                    : fc != null && !string.IsNullOrEmpty(fc.Name) ? "name:" + fc.Name
+                    : "none:" + (string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName);
 
-            if (!groups.TryGetValue(key, out var list))
-                groups[key] = list = new();
-            list.Add(c);
+            if (!map.TryGetValue(key, out var g))
+            {
+                map[key] = g = new FcGroup
+                {
+                    FcId = fc?.FreeCompanyId ?? 0,
+                    Name = fc?.Name ?? $"Not in an FC ({(string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName)})",
+                    Tag = fc?.Tag ?? "",
+                    World = c.WorldName,
+                    Level = fc?.Rank ?? 0,
+                    Credits = fc?.CreditsText ?? "",
+                    House = fc?.House,
+                };
+            }
+            g.Members.Add(c);
+
+            // best-known subs among the FC's tracked members
+            if (c.VesselsLastUpdatedUtc != null)
+            {
+                g.SubsKnown = true;
+                if (c.Submersibles.Count > g.SubCount) g.SubCount = c.Submersibles.Count;
+            }
+            // subrunner = the FC member flagged WorkshopEnabled in AutoRetainer.
+            if (c.IsWorkshopRunner)
+            {
+                g.SubRunnerAccountKey = c.AccountKey;
+                g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+            }
         }
 
-        // Sort group names.
-        var keys = new System.Collections.Generic.List<string>(groups.Keys);
-        keys.Sort(StringComparer.OrdinalIgnoreCase);
+        var groups = new System.Collections.Generic.List<FcGroup>(map.Values);
+        SortFcGroups(groups);
 
-        foreach (var key in keys)
+        var cfg = plugin.Config;
+        var cols = 9;
+        const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
+            | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
+
+        if (!ImGui.BeginTable("##fcgrouptable", cols, flags))
+            return;
+
+        // Frozen header row.
+        ImGui.TableSetupScrollFreeze(0, 1);
+        ImGui.TableSetupColumn("Go", ImGuiTableColumnFlags.WidthFixed, 28 * ImGuiHelpers.GlobalScale);
+        ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.1f);
+        ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.1f);
+        ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.2f);
+        ImGui.TableSetupColumn("Tag", ImGuiTableColumnFlags.WidthStretch, 0.8f);
+        ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthStretch, 0.6f);
+        ImGui.TableSetupColumn("Subs", ImGuiTableColumnFlags.WidthStretch, 0.6f);
+        ImGui.TableSetupColumn("House", ImGuiTableColumnFlags.WidthStretch, 1.6f);
+        ImGui.TableSetupColumn("Credits", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+
+        ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
+        ImGui.TableNextColumn(); // Go (no sort)
+        ImGui.TextDisabled("");
+        DrawFcSortHeader(FcSortCol.World, "World");
+        DrawFcSortHeader(FcSortCol.Account, "Account");
+        DrawFcSortHeader(FcSortCol.Name, "Free Company");
+        DrawFcSortHeader(FcSortCol.Tag, "Tag");
+        DrawFcSortHeader(FcSortCol.Level, "Level");
+        DrawFcSortHeader(FcSortCol.Subs, "Subs");
+        DrawFcSortHeader(FcSortCol.House, "House");
+        DrawFcSortHeader(FcSortCol.Credits, "Credits");
+
+        foreach (var g in groups)
+            DrawFcRow(g, cfg);
+
+        ImGui.EndTable();
+    }
+
+    private void DrawFcSortHeader(FcSortCol col, string label)
+    {
+        ImGui.TableNextColumn();
+        var arrow = fcSort == col ? (fcSortAsc ? " \u25B2" : " \u25BC") : "";
+        if (ImGui.Selectable($"{label}{arrow}###fchdr{(int)col}"))
         {
-            var members = groups[key];
-            var fc = members[0].Fc;
-
-            // FC header line with the FC-level info.
-            var tag = fc != null && !string.IsNullOrEmpty(fc.Tag) ? $" «{fc.Tag}»" : "";
-            var header = $"{key}{tag}  ({members.Count})";
-
-            if (!ImGui.CollapsingHeader($"{header}###grp{key}"))
-                continue;
-
-            ImGui.Indent(14 * ImGuiHelpers.GlobalScale);
-
-            // FC summary block.
-            if (fc != null)
-            {
-                var world = members[0].WorldName;
-                if (!string.IsNullOrEmpty(world)) ImGui.TextWrapped($"World: {world}");
-                ImGui.TextWrapped($"Level: {(fc.Rank > 0 ? fc.Rank.ToString() : "-")}    " +
-                                  $"Members: {fc.TotalMembers}    " +
-                                  $"Credits: {(string.IsNullOrEmpty(fc.CreditsText) ? "-" : fc.CreditsText)}");
-                DrawHouse(fc.House);
-
-                if (cfg.ShowFounderAndTime)
-                {
-                    // Original winner: pull from any member's manual house-winner note.
-                    var winner = "";
-                    foreach (var m in members)
-                        if (!string.IsNullOrEmpty(m.ManualHouseWinner)) { winner = m.ManualHouseWinner; break; }
-                    ImGui.TextDisabled($"Original winner: {(string.IsNullOrEmpty(winner) ? "(unknown — set in a character's notes)" : winner)}");
-                }
-            }
-            else
-            {
-                ImGui.TextDisabled("These characters are not currently in a Free Company.");
-            }
-
-            ImGuiHelpers.ScaledDummy(2f);
-            ImGui.Separator();
-
-            // Character subrows.
-            foreach (var c in members)
-            {
-                var name = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
-                var tri = expandedCid == c.ContentId ? "\u25BC " : "\u25B6 ";
-
-                var suffix = "";
-                if (cfg.ShowMemberFcRank && !string.IsNullOrEmpty(c.MyFcRank))
-                    suffix += $"  —  {c.MyFcRank}";
-                if (cfg.ShowFounderAndTime)
-                    suffix += $"  —  in FC since {ToLocal(c.FirstSeenInFcUtc)}";
-
-                if (ImGui.Selectable($"{tri}{name}{suffix}###grow{c.ContentId}", expandedCid == c.ContentId))
-                    expandedCid = expandedCid == c.ContentId ? 0 : c.ContentId;
-
-                if (expandedCid == c.ContentId)
-                {
-                    ImGui.Indent(12 * ImGuiHelpers.GlobalScale);
-                    DrawCharacterDetail(c);
-                    ImGui.Unindent(12 * ImGuiHelpers.GlobalScale);
-                }
-            }
-
-            ImGui.Unindent(14 * ImGuiHelpers.GlobalScale);
+            if (fcSort == col) fcSortAsc = !fcSortAsc;
+            else { fcSort = col; fcSortAsc = col is FcSortCol.World or FcSortCol.Account or FcSortCol.Name or FcSortCol.Tag; }
         }
+    }
+
+    private void SortFcGroups(System.Collections.Generic.List<FcGroup> list)
+    {
+        Comparison<FcGroup> cmp = fcSort switch
+        {
+            FcSortCol.World => (a, b) => string.Compare(a.World, b.World, StringComparison.OrdinalIgnoreCase),
+            FcSortCol.Account => (a, b) => string.Compare(AccountAliasLabel(a.SubRunnerAccountKey), AccountAliasLabel(b.SubRunnerAccountKey), StringComparison.OrdinalIgnoreCase),
+            FcSortCol.Name => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
+            FcSortCol.Tag => (a, b) => string.Compare(a.Tag, b.Tag, StringComparison.OrdinalIgnoreCase),
+            FcSortCol.Level => (a, b) => a.Level.CompareTo(b.Level),
+            FcSortCol.Subs => (a, b) => a.SubCount.CompareTo(b.SubCount),
+            FcSortCol.House => (a, b) => (a.House?.HasHouse == true ? 1 : 0).CompareTo(b.House?.HasHouse == true ? 1 : 0),
+            FcSortCol.Credits => (a, b) => CreditsVal(a.Credits).CompareTo(CreditsVal(b.Credits)),
+            _ => (a, b) => 0,
+        };
+        list.Sort((a, b) => { var r = cmp(a, b); return fcSortAsc ? r : -r; });
+    }
+
+    private static long CreditsVal(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return -1;
+        return long.TryParse(s.Replace(",", "").Replace(".", "").Replace(" ", ""), out var v) ? v : -1;
+    }
+
+    private void DrawFcRow(FcGroup g, Configuration cfg)
+    {
+        var grey = new Vector4(0.6f, 0.6f, 0.6f, 1f);
+        var red = new Vector4(0.85f, 0.5f, 0.5f, 1f);
+        var green = new Vector4(0.5f, 0.85f, 0.5f, 1f);
+        var hasHouse = g.House?.HasHouse == true;
+        var isOpen = expandedFcId == g.FcId && g.FcId != 0;
+
+        ImGui.TableNextRow();
+
+        // Go (Lifestream) button — only when the FC has a house.
+        ImGui.TableNextColumn();
+        if (hasHouse && g.House != null && !g.House.IsApartment)
+        {
+            if (ImGui.SmallButton($"\u27A4###go{g.FcId}")) // ➤ runner-ish glyph
+                PluginIpc.LifestreamGoToAddress(g.World, g.House.District, g.House.Ward, g.House.Plot);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"Lifestream to {g.World} {g.House.District} W{g.House.Ward} P{g.House.Plot}");
+        }
+        else
+        {
+            ImGui.TextDisabled("");
+        }
+
+        // World (click to expand the FC).
+        ImGui.TableNextColumn();
+        var tri = isOpen ? "\u25BC " : "\u25B6 ";
+        if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.World) ? "-" : g.World)}###fcrow{g.FcId}",
+                isOpen, ImGuiSelectableFlags.SpanAllColumns))
+            expandedFcId = isOpen ? 0 : g.FcId;
+
+        // Account alias
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(AccountAliasLabel(g.SubRunnerAccountKey));
+
+        // FC Name
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(g.Name);
+
+        // Tag
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(string.IsNullOrEmpty(g.Tag) ? "-" : g.Tag);
+
+        // Level (red if < 6)
+        ImGui.TableNextColumn();
+        if (g.Level == 0) ImGui.TextColored(grey, "-");
+        else if (g.Level < 6) ImGui.TextColored(red, g.Level.ToString());
+        else ImGui.TextUnformatted(g.Level.ToString());
+
+        // Subs #/4
+        ImGui.TableNextColumn();
+        if (!hasHouse) ImGui.TextColored(grey, "-");
+        else if (!g.SubsKnown) ImGui.TextColored(grey, "?/4");
+        else ImGui.TextColored(g.SubCount == 0 ? red : green, $"{g.SubCount}/4");
+
+        // House address (short)
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(ShortHouseAddress(g.House));
+
+        // Credits
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(string.IsNullOrEmpty(g.Credits) ? "-" : g.Credits);
+
+        // Expanded FC detail beneath the row.
+        if (isOpen)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            DrawFcDetail(g, cfg);
+        }
+    }
+
+    private string AccountAliasLabel(string accountKey)
+    {
+        if (string.IsNullOrEmpty(accountKey)) return "-";
+        return plugin.Config.AccountAliases.TryGetValue(accountKey, out var a) && !string.IsNullOrEmpty(a)
+            ? a : "(unnamed)";
+    }
+
+    private void DrawFcDetail(FcGroup g, Configuration cfg)
+    {
+        ImGui.Indent(14 * ImGuiHelpers.GlobalScale);
+
+        // Additional info section.
+        var runnerLabel = string.IsNullOrEmpty(g.SubRunnerName)
+            ? AccountAliasLabel(g.SubRunnerAccountKey)
+            : $"{g.SubRunnerName}  ({AccountAliasLabel(g.SubRunnerAccountKey)})";
+        ImGui.TextWrapped($"Sub-runner: {runnerLabel}");
+
+        // Original winner — editable, pulled/stored on the first member.
+        var holder = g.Members[0];
+        var winner = holder.ManualHouseWinner;
+        ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputText($"Original winner###winner{g.FcId}", ref winner, 128))
+        {
+            holder.ManualHouseWinner = winner;
+            plugin.PersistCharacter(holder);
+        }
+
+        ImGui.TextDisabled($"First registered: {ToLocal(EarliestFirstSeen(g))}");
+        if (g.Members[0].Fc != null)
+            ImGui.TextDisabled($"Last data update: {ToLocal(g.Members[0].Fc!.LastUpdatedUtc)}");
+
+        // Submersibles dropdown (ranks + builds) — use the member with sub data.
+        var subHolder = g.Members.Find(m => m.Submersibles.Count > 0);
+        if (subHolder != null)
+            DrawVessels("Submersibles", subHolder.Submersibles, subHolder);
+
+        // Characters table.
+        ImGuiHelpers.ScaledDummy(4f);
+        if (ImGui.BeginTable($"##fcmembers{g.FcId}", 3,
+                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        {
+            ImGui.TableSetupColumn("Character");
+            ImGui.TableSetupColumn("Rank in FC");
+            ImGui.TableSetupColumn("Days in FC");
+            ImGui.TableHeadersRow();
+
+            foreach (var m in g.Members)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                var nm = string.IsNullOrEmpty(m.WorldName) ? m.CharacterName : $"{m.CharacterName} @ {m.WorldName}";
+                if (ImGui.Selectable($"{nm}###fcm{m.ContentId}", expandedCid == m.ContentId))
+                    expandedCid = expandedCid == m.ContentId ? 0 : m.ContentId;
+
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted(cfg.ShowMemberFcRank && !string.IsNullOrEmpty(m.MyFcRank) ? m.MyFcRank : "-");
+
+                ImGui.TableNextColumn();
+                var days = (int)(DateTime.UtcNow - m.FirstSeenInFcUtc).TotalDays;
+                if (days <= 30) ImGui.TextColored(new Vector4(0.85f, 0.5f, 0.5f, 1f), days.ToString());
+                else ImGui.TextUnformatted(days.ToString());
+            }
+            ImGui.EndTable();
+        }
+
+        // Per-character detail when a member is clicked.
+        if (expandedCid != 0)
+        {
+            var m = g.Members.Find(x => x.ContentId == expandedCid);
+            if (m != null)
+            {
+                ImGui.Separator();
+                DrawCharacterDetail(m);
+            }
+        }
+
+        // Account alias quick-edit hint.
+        if (!string.IsNullOrEmpty(g.SubRunnerAccountKey) && !plugin.Config.AccountAliases.ContainsKey(g.SubRunnerAccountKey))
+        {
+            ImGuiHelpers.ScaledDummy(2f);
+            ImGui.TextDisabled("Tip: name this account in Settings → Accounts.");
+        }
+
+        ImGui.Unindent(14 * ImGuiHelpers.GlobalScale);
+    }
+
+    private static DateTime EarliestFirstSeen(FcGroup g)
+    {
+        var earliest = DateTime.MaxValue;
+        foreach (var m in g.Members)
+            if (m.FirstSeenInFcUtc < earliest) earliest = m.FirstSeenInFcUtc;
+        return earliest == DateTime.MaxValue ? DateTime.UtcNow : earliest;
     }
 
     private void DrawSortHeader(SortCol col, string label)
@@ -314,6 +526,29 @@ public class MainWindow : Window
         return plugin.Config.AccountAliases.TryGetValue(c.AccountKey, out var alias) && !string.IsNullOrEmpty(alias)
             ? alias
             : "(unnamed)";
+    }
+
+    // Subs "#/4": "-" if no house; red "0/4" if has house but no subs.
+    private static (string text, Vector4 color) SubsCell(CharacterRecord c)
+    {
+        var grey = new Vector4(0.6f, 0.6f, 0.6f, 1f);
+        var red = new Vector4(0.85f, 0.5f, 0.5f, 1f);
+        var green = new Vector4(0.5f, 0.85f, 0.5f, 1f);
+
+        var hasHouse = c.Fc?.House?.HasHouse == true;
+        if (!hasHouse) return ("-", grey);
+
+        if (c.VesselsLastUpdatedUtc == null) return ("?/4", grey);
+        var n = c.Submersibles.Count;
+        return ($"{n}/4", n == 0 ? red : green);
+    }
+
+    // Short house address: "Mist W1 P1" (no world — it's shown separately).
+    private static string ShortHouseAddress(HouseRecord? h)
+    {
+        if (h == null || !h.HasHouse) return "-";
+        if (h.IsApartment) return $"{h.District} Apt (W{h.Ward})";
+        return $"{h.District} W{h.Ward} P{h.Plot}";
     }
 
     private void DrawCharacterRow(CharacterRecord c)

@@ -117,6 +117,26 @@ public static unsafe class GameReader
 
     // Decode a null-terminated UTF8 string from a byte span (used for inline
     // struct strings that aren't declared with isString).
+    // Opens the Free Company window via its agent (AgentInterface.Show). Used by the
+    // optional auto-open-on-login flow; the window is briefly visible on screen.
+    public static void OpenFreeCompanyWindow()
+    {
+        var agent = AgentFreeCompany.Instance();
+        if (agent == null) return;
+        if (!agent->IsAgentActive())
+            agent->Show();
+    }
+
+    // Closes the FreeCompany addon if it's open.
+    public static void CloseFreeCompanyWindow(IGameGui gameGui)
+    {
+        var addr = gameGui.GetAddonByName("FreeCompany", 1);
+        if (addr == nint.Zero) return;
+        var addon = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)addr;
+        if (addon != null && addon->IsVisible)
+            addon->Close(true);
+    }
+
     // BEST-EFFORT: read the logged-in character's own FC rank from the FreeCompany
     // window's member context. There is no clean struct field for a member's rank,
     // so this scrapes text nodes and may return empty. Gated behind a setting.

@@ -36,11 +36,15 @@ public class Configuration : IPluginConfiguration
     public bool ShowMemberFcRank = false;   // best-effort scrape of own FC rank
     public bool ShowFounderAndTime = false; // founder/original-winner + time-in-FC
 
-    // Account aliases: maps a detected Dalamud roaming path -> a friendly name the
-    // user assigns (e.g. "Main", "Alt box"). The plugin auto-detects the path it is
-    // running under; the alias itself is user-entered (the launcher's account label
-    // isn't exposed to plugins).
+    // Account aliases: maps a detected Dalamud roaming path -> a friendly name.
+    // (ServiceAccount turned out to be the wrong axis — it's the paid +chars tier,
+    // not the user's separate game accounts, which correspond to roaming paths.)
     public Dictionary<string, string> AccountAliases = new();
+
+    // When true, on login (if AutoRetainer multimode is enabled) briefly open the FC
+    // window to refresh level/credits/house. Off by default — the window flickers
+    // open on screen when this fires.
+    public bool AutoOpenFcOnLogin = false;
 
     [NonSerialized] private IDalamudPluginInterface? pluginInterface;
 
