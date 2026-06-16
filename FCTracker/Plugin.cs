@@ -407,7 +407,8 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             // Only meaningful right after a housing placard.
-            var signboardOpen = GameGui.GetAddonByName("HousingSignBoard", 1) != nint.Zero;
+            nint signboard = GameGui.GetAddonByName("HousingSignBoard", 1);
+            var signboardOpen = signboard != nint.Zero;
             if (!signboardOpen) return;
 
             var text = GameReader.ReadSelectYesnoPrompt(args.Addon);

@@ -4,6 +4,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using FCTracker.Data;
+using FCTracker.Game;
 
 namespace FCTracker.Windows;
 

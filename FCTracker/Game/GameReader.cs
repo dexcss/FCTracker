@@ -130,7 +130,7 @@ public static unsafe class GameReader
     // Closes the FreeCompany addon if it's open.
     public static void CloseFreeCompanyWindow(IGameGui gameGui)
     {
-        var addr = gameGui.GetAddonByName("FreeCompany", 1);
+        nint addr = gameGui.GetAddonByName("FreeCompany", 1);
         if (addr == nint.Zero) return;
         var addon = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)addr;
         if (addon != null && addon->IsVisible)
