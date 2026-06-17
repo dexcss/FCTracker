@@ -40,6 +40,7 @@ public class Configuration : IPluginConfiguration
     public bool ShowLoginButton = false;    // door icon to log into a character (Lifestream)
     public bool ShowRegionColumn = false;   // region column in both views
     public bool SubsortByRegion = false;    // group rows by region, then secondary sort
+    public bool ManualColumnResize = false; // true = draggable column borders; false = auto-fit
 
     // Per-column visibility for the FC table. Defaults match the prior layout.
     public bool ColTp = true;          // Lifestream-to-house button

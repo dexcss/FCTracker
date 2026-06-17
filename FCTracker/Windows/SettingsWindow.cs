@@ -52,6 +52,15 @@ public class SettingsWindow : Window
         ImGui.TextDisabled("With this on, sorting by e.g. World keeps NA worlds together, then EU, etc. " +
                            "(Enable the Region column below to show it.)");
 
+        var manualResize = config.ManualColumnResize;
+        if (ImGui.Checkbox("Manual column resizing (drag borders)", ref manualResize))
+        {
+            config.ManualColumnResize = manualResize;
+            config.Save();
+        }
+        ImGui.TextDisabled("Off = columns auto-fit the window. On = drag column borders yourself " +
+                           "(widths stay put and won't auto-reflow when the window resizes).");
+
         ImGuiHelpers.ScaledDummy(6f);
 
         // --- Columns ---

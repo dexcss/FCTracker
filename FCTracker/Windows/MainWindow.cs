@@ -289,11 +289,15 @@ public class MainWindow : Window
         // The first non-button column owns the expand triangle.
         var triCol = columns.Find(c => !IsButtonCol(c));
 
-        // No Resizable: stretch columns always auto-distribute to fit the window
-        // width, so resizing the window reflows every column instead of letting one
-        // border shove into its neighbour.
-        const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
-            | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY | ImGuiTableFlags.NoSavedSettings;
+        // Auto-fit (default): stretch columns always redistribute to fit the window.
+        // Manual: add Resizable so borders can be dragged (widths then persist and
+        // won't auto-reflow — that's the trade-off, which is why it's a choice).
+        var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
+            | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
+        if (cfg.ManualColumnResize)
+            flags |= ImGuiTableFlags.Resizable;
+        else
+            flags |= ImGuiTableFlags.NoSavedSettings; // don't cache stale widths in auto mode
 
         var detailOpen = !string.IsNullOrEmpty(expandedFcKey) && groups.Exists(x => x.Key == expandedFcKey);
         var outerSize = new Vector2(0, detailOpen ? ImGui.GetContentRegionAvail().Y * 0.5f : 0f);
