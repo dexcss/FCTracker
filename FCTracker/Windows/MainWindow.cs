@@ -123,7 +123,11 @@ public class MainWindow : Window
         const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
             | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
 
-        if (ImGui.BeginTable("##fctable", cols, flags))
+        // Cap table height when a detail is open so it has room below it.
+        var detailOpen = expandedCid != 0 && rows.Exists(x => x.ContentId == expandedCid);
+        var outerSize = new Vector2(0, detailOpen ? ImGui.GetContentRegionAvail().Y * 0.5f : 0f);
+
+        if (ImGui.BeginTable("##fctable", cols, flags, outerSize))
         {
             ImGui.TableSetupScrollFreeze(0, 1);
             if (cfg.ShowLoginButton)
@@ -168,7 +172,9 @@ public class MainWindow : Window
             {
                 ImGuiHelpers.ScaledDummy(4f);
                 ImGui.Separator();
-                DrawCharacterDetail(open);
+                if (ImGui.BeginChild("##chardetail", new Vector2(0, 0), false))
+                    DrawCharacterDetail(open);
+                ImGui.EndChild();
             }
         }
     }
@@ -260,7 +266,14 @@ public class MainWindow : Window
         const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
             | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
 
-        if (!ImGui.BeginTable("##fcgrouptable", cols, flags))
+        // When a row is expanded, cap the table height so the detail panel has room
+        // below it; otherwise the ScrollY table eats all vertical space and the
+        // detail renders off-screen (showing only an empty extra scrollbar).
+        var detailOpen = !string.IsNullOrEmpty(expandedFcKey) && groups.Exists(x => x.Key == expandedFcKey);
+        var tableHeight = detailOpen ? ImGui.GetContentRegionAvail().Y * 0.5f : 0f;
+        var outerSize = new Vector2(0, tableHeight);
+
+        if (!ImGui.BeginTable("##fcgrouptable", cols, flags, outerSize))
             return;
 
         // Frozen header row.
@@ -298,7 +311,7 @@ public class MainWindow : Window
         ImGui.EndTable();
 
         // Expanded FC detail renders full-width BELOW the table so it isn't clipped
-        // into the first column.
+        // into the first column. Wrapped in a child so it scrolls independently.
         if (!string.IsNullOrEmpty(expandedFcKey))
         {
             var open = groups.Find(x => x.Key == expandedFcKey);
@@ -306,7 +319,9 @@ public class MainWindow : Window
             {
                 ImGuiHelpers.ScaledDummy(4f);
                 ImGui.Separator();
-                DrawFcDetail(open, cfg);
+                if (ImGui.BeginChild("##fcdetail", new Vector2(0, 0), false))
+                    DrawFcDetail(open, cfg);
+                ImGui.EndChild();
             }
         }
     }
