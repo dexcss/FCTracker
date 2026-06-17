@@ -57,6 +57,10 @@ public class Configuration : IPluginConfiguration
     public bool ColCredits = true;
     public bool ColCustomName = false; // custom per-FC house/label name
 
+    // Column display order (by name). Any columns missing here are appended in
+    // default order; unknown names are ignored. Lets users reorder via settings.
+    public List<string> ColumnOrder = new();
+
     // Per-FC custom names (keyed by the same stable FC key the UI uses).
     public Dictionary<string, string> CustomFcNames = new();
 

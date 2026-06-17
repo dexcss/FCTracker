@@ -43,50 +43,53 @@ public class SettingsWindow : Window
                            "window and only recognises default rank names (Master/Officer/Member/etc.); " +
                            "custom-renamed ranks will show blank. Shown in each FC's character table.");
 
-        var showLogin = config.ShowLoginButton;
-        if (ImGui.Checkbox("Show login button (requires Lifestream)", ref showLogin))
-        {
-            config.ShowLoginButton = showLogin;
-            config.Save();
-        }
-        ImGui.TextDisabled("Adds a door button to log into the FC's sub-runner via Lifestream.");
-
-        var showRegion = config.ShowRegionColumn;
-        if (ImGui.Checkbox("Show region column", ref showRegion))
-        {
-            config.ShowRegionColumn = showRegion;
-            config.Save();
-        }
-
         var subsort = config.SubsortByRegion;
         if (ImGui.Checkbox("Sub-sort by region (group regions together, then sort within)", ref subsort))
         {
             config.SubsortByRegion = subsort;
             config.Save();
         }
-        ImGui.TextDisabled("With this on, sorting by e.g. World keeps NA worlds together, then EU, etc.");
+        ImGui.TextDisabled("With this on, sorting by e.g. World keeps NA worlds together, then EU, etc. " +
+                           "(Enable the Region column below to show it.)");
 
         ImGuiHelpers.ScaledDummy(6f);
 
         // --- Columns ---
         ImGui.TextUnformatted("Columns");
         ImGui.Separator();
-        ImGui.TextDisabled("Choose which columns appear in the FC table.");
+        ImGui.TextDisabled("Check to show. Use the arrows to reorder (top = leftmost).");
 
-        ColumnToggle("TP (teleport-to-house button)", ref config.ColTp, config);
-        ColumnToggle("LOG (login button — also needs 'Show login button' above)", ref config.ColLogin, config);
-        ColumnToggle("Region", ref config.ColRegion, config);
-        ColumnToggle("World", ref config.ColWorld, config);
-        ColumnToggle("Account", ref config.ColAccount, config);
-        ColumnToggle("Sub-runner", ref config.ColSubRunner, config);
-        ColumnToggle("Custom name (per-FC label you can edit & sort by)", ref config.ColCustomName, config);
-        ColumnToggle("Free Company", ref config.ColFc, config);
-        ColumnToggle("Tag", ref config.ColTag, config);
-        ColumnToggle("Members", ref config.ColMembers, config);
-        ColumnToggle("Level", ref config.ColLevel, config);
-        ColumnToggle("Subs", ref config.ColSubs, config);
-        ColumnToggle("House", ref config.ColHouse, config);
-        ColumnToggle("Credits", ref config.ColCredits, config);
+        var order = MainWindow.OrderedColumnNames(config);
+        var moved = false;
+        for (var i = 0; i < order.Count && !moved; i++)
+        {
+            var name = order[i];
+            ImGui.PushID($"col{i}");
+
+            var enabled = GetColEnabled(config, name);
+            if (ImGui.Checkbox(name, ref enabled))
+            {
+                SetColEnabled(config, name, enabled);
+                config.Save();
+            }
+
+            ImGui.SameLine(ImGui.GetContentRegionAvail().X - 60 * ImGuiHelpers.GlobalScale);
+            if (ImGui.ArrowButton("up", ImGuiDir.Up) && i > 0)
+            {
+                MoveColumn(config, order, i, i - 1);
+                config.Save();
+                moved = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.ArrowButton("down", ImGuiDir.Down) && i < order.Count - 1)
+            {
+                MoveColumn(config, order, i, i + 1);
+                config.Save();
+                moved = true;
+            }
+
+            ImGui.PopID();
+        }
 
         ImGuiHelpers.ScaledDummy(6f);
 
@@ -216,10 +219,55 @@ public class SettingsWindow : Window
         DrawResetEverything();
     }
 
-    private static void ColumnToggle(string label, ref bool value, Configuration config)
+    private static bool GetColEnabled(Configuration c, string name) => name switch
     {
-        if (ImGui.Checkbox(label, ref value))
-            config.Save();
+        "TP" => c.ColTp,
+        "LOG" => c.ColLogin,
+        "Region" => c.ColRegion,
+        "World" => c.ColWorld,
+        "Account" => c.ColAccount,
+        "Sub-runner" => c.ColSubRunner,
+        "Custom name" => c.ColCustomName,
+        "Free Company" => c.ColFc,
+        "Tag" => c.ColTag,
+        "Members" => c.ColMembers,
+        "Level" => c.ColLevel,
+        "Subs" => c.ColSubs,
+        "House" => c.ColHouse,
+        "Credits" => c.ColCredits,
+        _ => false,
+    };
+
+    private static void SetColEnabled(Configuration c, string name, bool v)
+    {
+        switch (name)
+        {
+            case "TP": c.ColTp = v; break;
+            case "LOG": c.ColLogin = v; break;
+            case "Region": c.ColRegion = v; break;
+            case "World": c.ColWorld = v; break;
+            case "Account": c.ColAccount = v; break;
+            case "Sub-runner": c.ColSubRunner = v; break;
+            case "Custom name": c.ColCustomName = v; break;
+            case "Free Company": c.ColFc = v; break;
+            case "Tag": c.ColTag = v; break;
+            case "Members": c.ColMembers = v; break;
+            case "Level": c.ColLevel = v; break;
+            case "Subs": c.ColSubs = v; break;
+            case "House": c.ColHouse = v; break;
+            case "Credits": c.ColCredits = v; break;
+        }
+    }
+
+    // Persists the current visible order into config.ColumnOrder, with the moved item
+    // shifted from -> to.
+    private static void MoveColumn(Configuration c, System.Collections.Generic.List<string> order, int from, int to)
+    {
+        if (from < 0 || from >= order.Count || to < 0 || to >= order.Count) return;
+        var item = order[from];
+        order.RemoveAt(from);
+        order.Insert(to, item);
+        c.ColumnOrder = new System.Collections.Generic.List<string>(order);
     }
 
     private void DrawResetEverything()

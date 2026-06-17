@@ -214,23 +214,66 @@ public class MainWindow : Window
     // Column identity for visibility + ordering.
     private enum Col { Tp, Login, Region, World, Account, SubRunner, CustomName, Fc, Tag, Members, Level, Subs, House, Credits }
 
+    // Stable string name per column (used for the saved order list).
+    private static readonly (Col col, string name)[] AllColumns =
+    {
+        (Col.Tp, "TP"), (Col.Login, "LOG"), (Col.Region, "Region"), (Col.World, "World"),
+        (Col.Account, "Account"), (Col.SubRunner, "Sub-runner"), (Col.CustomName, "Custom name"),
+        (Col.Fc, "Free Company"), (Col.Tag, "Tag"), (Col.Members, "Members"), (Col.Level, "Level"),
+        (Col.Subs, "Subs"), (Col.House, "House"), (Col.Credits, "Credits"),
+    };
+
+    private static bool IsColEnabled(Col c, Configuration cfg) => c switch
+    {
+        Col.Tp => cfg.ColTp,
+        Col.Login => cfg.ColLogin,
+        Col.Region => cfg.ColRegion,
+        Col.World => cfg.ColWorld,
+        Col.Account => cfg.ColAccount,
+        Col.SubRunner => cfg.ColSubRunner,
+        Col.CustomName => cfg.ColCustomName,
+        Col.Fc => cfg.ColFc,
+        Col.Tag => cfg.ColTag,
+        Col.Members => cfg.ColMembers,
+        Col.Level => cfg.ColLevel,
+        Col.Subs => cfg.ColSubs,
+        Col.House => cfg.ColHouse,
+        Col.Credits => cfg.ColCredits,
+        _ => false,
+    };
+
+    // The full column order (enabled or not), honoring the user's saved order with
+    // any unlisted columns appended in default order.
+    public static List<Col> OrderedAllColumns(Configuration cfg)
+    {
+        var byName = new Dictionary<string, Col>();
+        foreach (var (col, name) in AllColumns) byName[name] = col;
+
+        var result = new List<Col>();
+        var seen = new HashSet<Col>();
+        foreach (var name in cfg.ColumnOrder)
+            if (byName.TryGetValue(name, out var col) && seen.Add(col))
+                result.Add(col);
+        foreach (var (col, _) in AllColumns)
+            if (seen.Add(col)) result.Add(col);
+        return result;
+    }
+
+    // Public, string-based view of the ordered columns for the settings UI.
+    public static List<string> OrderedColumnNames(Configuration cfg)
+    {
+        var nameByCol = new Dictionary<Col, string>();
+        foreach (var (col, name) in AllColumns) nameByCol[col] = name;
+        var outList = new List<string>();
+        foreach (var c in OrderedAllColumns(cfg)) outList.Add(nameByCol[c]);
+        return outList;
+    }
+
     private List<Col> EnabledColumns(Configuration cfg)
     {
         var list = new List<Col>();
-        if (cfg.ColTp) list.Add(Col.Tp);
-        if (cfg.ShowLoginButton && cfg.ColLogin) list.Add(Col.Login);
-        if (cfg.ColRegion) list.Add(Col.Region);
-        if (cfg.ColWorld) list.Add(Col.World);
-        if (cfg.ColAccount) list.Add(Col.Account);
-        if (cfg.ColSubRunner) list.Add(Col.SubRunner);
-        if (cfg.ColCustomName) list.Add(Col.CustomName);
-        if (cfg.ColFc) list.Add(Col.Fc);
-        if (cfg.ColTag) list.Add(Col.Tag);
-        if (cfg.ColMembers) list.Add(Col.Members);
-        if (cfg.ColLevel) list.Add(Col.Level);
-        if (cfg.ColSubs) list.Add(Col.Subs);
-        if (cfg.ColHouse) list.Add(Col.House);
-        if (cfg.ColCredits) list.Add(Col.Credits);
+        foreach (var c in OrderedAllColumns(cfg))
+            if (IsColEnabled(c, cfg)) list.Add(c);
         return list;
     }
 
@@ -246,9 +289,11 @@ public class MainWindow : Window
         // The first non-button column owns the expand triangle.
         var triCol = columns.Find(c => !IsButtonCol(c));
 
+        // No Resizable: stretch columns always auto-distribute to fit the window
+        // width, so resizing the window reflows every column instead of letting one
+        // border shove into its neighbour.
         const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
-            | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY
-            | ImGuiTableFlags.NoSavedSettings; // don't cache dragged widths -> reflow on window resize
+            | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY | ImGuiTableFlags.NoSavedSettings;
 
         var detailOpen = !string.IsNullOrEmpty(expandedFcKey) && groups.Exists(x => x.Key == expandedFcKey);
         var outerSize = new Vector2(0, detailOpen ? ImGui.GetContentRegionAvail().Y * 0.5f : 0f);
