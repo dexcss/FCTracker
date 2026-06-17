@@ -33,39 +33,15 @@ public class SettingsWindow : Window
         ImGui.TextUnformatted("View");
         ImGui.Separator();
 
-        var group = config.GroupByFc;
-        if (ImGui.Checkbox("Group by Free Company (characters nested under each FC)", ref group))
-        {
-            config.GroupByFc = group;
-            config.Save();
-        }
-
-        var showAcct = config.ShowAccountColumn;
-        if (ImGui.Checkbox("Show account column (uses aliases below)", ref showAcct))
-        {
-            config.ShowAccountColumn = showAcct;
-            config.Save();
-        }
-
         var showRank = config.ShowMemberFcRank;
-        if (ImGui.Checkbox("Show member FC rank (experimental)", ref showRank))
+        if (ImGui.Checkbox("Capture member FC rank (experimental)", ref showRank))
         {
             config.ShowMemberFcRank = showRank;
             config.Save();
         }
         ImGui.TextDisabled("The game doesn't expose a member's rank cleanly. This scrapes the FC " +
                            "window and only recognises default rank names (Master/Officer/Member/etc.); " +
-                           "custom-renamed ranks will show blank.");
-
-        var showFounder = config.ShowFounderAndTime;
-        if (ImGui.Checkbox("Show original winner / time-in-FC", ref showFounder))
-        {
-            config.ShowFounderAndTime = showFounder;
-            config.Save();
-        }
-        ImGui.TextDisabled("Original winner is manual/auto-detected only (not in the game). " +
-                           "Time-in-FC is measured from when this plugin first saw the character, " +
-                           "not a real join date.");
+                           "custom-renamed ranks will show blank. Shown in each FC's character table.");
 
         var showLogin = config.ShowLoginButton;
         if (ImGui.Checkbox("Show login button (requires Lifestream)", ref showLogin))
@@ -73,7 +49,7 @@ public class SettingsWindow : Window
             config.ShowLoginButton = showLogin;
             config.Save();
         }
-        ImGui.TextDisabled("Adds a door button to log into a character via Lifestream's ConnectAndLogin.");
+        ImGui.TextDisabled("Adds a door button to log into the FC's sub-runner via Lifestream.");
 
         var showRegion = config.ShowRegionColumn;
         if (ImGui.Checkbox("Show region column", ref showRegion))
