@@ -177,11 +177,12 @@ public class MainWindow : Window
     private enum FcSortCol { Region, World, Account, Name, Tag, Level, Subs, House, Credits }
     private FcSortCol fcSort = FcSortCol.Name;
     private bool fcSortAsc = true;
-    private ulong expandedFcId;
+    private string expandedFcKey = "";
 
     // A grouped FC entry built from one or more of the user's characters.
     private class FcGroup
     {
+        public string Key = "";       // stable identity for expand state
         public ulong FcId;
         public string Name = "";
         public string Tag = "";
@@ -216,6 +217,7 @@ public class MainWindow : Window
             {
                 map[key] = g = new FcGroup
                 {
+                    Key = key,
                     FcId = fc?.FreeCompanyId ?? 0,
                     Name = fc?.Name ?? $"Not in an FC ({(string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName)})",
                     Tag = fc?.Tag ?? "",
@@ -297,9 +299,9 @@ public class MainWindow : Window
 
         // Expanded FC detail renders full-width BELOW the table so it isn't clipped
         // into the first column.
-        if (expandedFcId != 0)
+        if (!string.IsNullOrEmpty(expandedFcKey))
         {
-            var open = groups.Find(x => x.FcId == expandedFcId);
+            var open = groups.Find(x => x.Key == expandedFcKey);
             if (open != null)
             {
                 ImGuiHelpers.ScaledDummy(4f);
@@ -359,7 +361,7 @@ public class MainWindow : Window
         var red = new Vector4(0.85f, 0.5f, 0.5f, 1f);
         var green = new Vector4(0.5f, 0.85f, 0.5f, 1f);
         var hasHouse = g.House?.HasHouse == true;
-        var isOpen = expandedFcId == g.FcId && g.FcId != 0;
+        var isOpen = expandedFcKey == g.Key;
 
         ImGui.TableNextRow();
 
@@ -367,7 +369,7 @@ public class MainWindow : Window
         ImGui.TableNextColumn();
         if (hasHouse && g.House != null && !g.House.IsApartment)
         {
-            if (ImGui.SmallButton($"\u27A4###go{g.FcId}")) // ➤ travel-to-house
+            if (ImGui.SmallButton($"\u27A4###go{g.Key}")) // ➤ travel-to-house
                 PluginIpc.LifestreamGoToAddress(g.World, g.House.District, g.House.Ward, g.House.Plot);
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip($"Lifestream to {g.World} {g.House.District} W{g.House.Ward} P{g.House.Plot}");
@@ -381,7 +383,7 @@ public class MainWindow : Window
             var loginTarget = g.Members.Find(m => m.IsWorkshopRunner) ?? (g.Members.Count > 0 ? g.Members[0] : null);
             if (loginTarget != null && !string.IsNullOrEmpty(loginTarget.CharacterName) && !string.IsNullOrEmpty(loginTarget.WorldName))
             {
-                if (ImGui.SmallButton($"\uE03C###login{g.FcId}")) // door-ish glyph
+                if (ImGui.SmallButton($"\uE03C###login{g.Key}")) // door-ish glyph
                     PluginIpc.LifestreamLogin(loginTarget.CharacterName, loginTarget.WorldName);
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip($"Log into {loginTarget.CharacterName} @ {loginTarget.WorldName} (Lifestream)");
@@ -394,9 +396,9 @@ public class MainWindow : Window
         if (cfg.ShowRegionColumn)
         {
             ImGui.TableNextColumn();
-            if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.Region) ? "-" : g.Region)}###fcrow{g.FcId}",
+            if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.Region) ? "-" : g.Region)}###fcrow{g.Key}",
                     isOpen, ImGuiSelectableFlags.SpanAllColumns))
-                expandedFcId = isOpen ? 0 : g.FcId;
+                expandedFcKey = isOpen ? "" : g.Key;
 
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(string.IsNullOrEmpty(g.World) ? "-" : g.World);
@@ -404,9 +406,9 @@ public class MainWindow : Window
         else
         {
             ImGui.TableNextColumn();
-            if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.World) ? "-" : g.World)}###fcrow{g.FcId}",
+            if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.World) ? "-" : g.World)}###fcrow{g.Key}",
                     isOpen, ImGuiSelectableFlags.SpanAllColumns))
-                expandedFcId = isOpen ? 0 : g.FcId;
+                expandedFcKey = isOpen ? "" : g.Key;
         }
 
         // Account alias
@@ -463,7 +465,7 @@ public class MainWindow : Window
         var holder = g.Members[0];
         var winner = holder.ManualHouseWinner;
         ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
-        if (ImGui.InputText($"Original winner###winner{g.FcId}", ref winner, 128))
+        if (ImGui.InputText($"Original winner###winner{g.Key}", ref winner, 128))
         {
             holder.ManualHouseWinner = winner;
             plugin.PersistCharacter(holder);
@@ -480,7 +482,7 @@ public class MainWindow : Window
 
         // Characters table.
         ImGuiHelpers.ScaledDummy(4f);
-        if (ImGui.BeginTable($"##fcmembers{g.FcId}", 3,
+        if (ImGui.BeginTable($"##fcmembers{g.Key}", 3,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
             ImGui.TableSetupColumn("Character");
