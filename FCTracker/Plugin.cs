@@ -280,22 +280,46 @@ public sealed class Plugin : IDalamudPlugin
 
         try
         {
-            // Don't fight a cutscene/loading; only open if we're in a normal state.
             if (!ClientState.IsLoggedIn) return;
             GameReader.OpenFreeCompanyWindow();
-            // The next normal Poll will read it; we close it shortly after.
-            pendingFcCloseAt = DateTime.UtcNow.AddSeconds(3);
+            // Actively poll for credits while open, then close. Up to ~6s.
+            fcReadDeadline = DateTime.UtcNow.AddSeconds(6);
+            fcReadGotCredits = false;
         }
         catch (Exception ex) { Log.Error(ex, "FC auto-open failed"); }
     }
 
-    private DateTime pendingFcCloseAt = DateTime.MaxValue;
-    private void TryScheduledFcClose()
+    private DateTime fcReadDeadline = DateTime.MaxValue;
+    private bool fcReadGotCredits;
+    private void TryScheduledFcRead()
     {
-        if (DateTime.UtcNow < pendingFcCloseAt) return;
-        pendingFcCloseAt = DateTime.MaxValue;
-        try { GameReader.CloseFreeCompanyWindow(GameGui); }
-        catch (Exception ex) { Log.Error(ex, "FC auto-close failed"); }
+        if (fcReadDeadline == DateTime.MaxValue) return;
+
+        var local = ObjectTable.LocalPlayer;
+        var cid = PlayerState.ContentId;
+        if (local != null && cid != 0)
+        {
+            var fc = GameReader.ReadFreeCompany();
+            if (fc != null)
+            {
+                var rec = Config.Characters.Find(x => x.ContentId == cid);
+                var credits = AddonScraper.TryReadFcCredits(GameGui, fc.Rank, fc.OnlineMembers, fc.TotalMembers);
+                if (!string.IsNullOrEmpty(credits) && rec?.Fc != null)
+                {
+                    rec.Fc.CreditsText = credits;
+                    PersistCharacter(rec);
+                    fcReadGotCredits = true;
+                }
+            }
+        }
+
+        // Close once we have credits, or when the deadline passes.
+        if (fcReadGotCredits || DateTime.UtcNow >= fcReadDeadline)
+        {
+            fcReadDeadline = DateTime.MaxValue;
+            try { GameReader.CloseFreeCompanyWindow(GameGui); }
+            catch (Exception ex) { Log.Error(ex, "FC auto-close failed"); }
+        }
     }
 
     private void OnUpdate(IFramework framework)
@@ -303,7 +327,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!ClientState.IsLoggedIn) return;
 
         TryScheduledFcOpen();
-        TryScheduledFcClose();
+        TryScheduledFcRead();
 
         // Periodically re-read the shared file so this client sees other clients'
         // updates (their characters, their latest vessel timers, etc).

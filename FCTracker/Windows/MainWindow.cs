@@ -36,7 +36,7 @@ public class MainWindow : Window
     private string search = string.Empty;
 
     // Current sort state.
-    private enum SortCol { Character, World, FreeCompany, Tag, Level, House, Subs, Credits }
+    private enum SortCol { Character, Region, World, FreeCompany, Tag, Level, House, Subs, Credits }
     private SortCol sortColumn = SortCol.Character;
     private bool sortAscending = true;
 
@@ -115,13 +115,22 @@ public class MainWindow : Window
     // ---- Flat list (default) ----
     private void DrawFlat(System.Collections.Generic.List<CharacterRecord> rows)
     {
-        var cols = plugin.Config.ShowAccountColumn ? 9 : 8;
+        var cfg = plugin.Config;
+        var cols = 8
+            + (cfg.ShowLoginButton ? 1 : 0)
+            + (cfg.ShowRegionColumn ? 1 : 0)
+            + (cfg.ShowAccountColumn ? 1 : 0);
         const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
             | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
 
         if (ImGui.BeginTable("##fctable", cols, flags))
         {
+            ImGui.TableSetupScrollFreeze(0, 1);
+            if (cfg.ShowLoginButton)
+                ImGui.TableSetupColumn("Login", ImGuiTableColumnFlags.WidthFixed, 28 * ImGuiHelpers.GlobalScale);
             ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch, 2.0f);
+            if (cfg.ShowRegionColumn)
+                ImGui.TableSetupColumn("Region", ImGuiTableColumnFlags.WidthStretch, 0.7f);
             ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.2f);
             ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.2f);
             ImGui.TableSetupColumn("Tag", ImGuiTableColumnFlags.WidthStretch, 0.8f);
@@ -129,11 +138,13 @@ public class MainWindow : Window
             ImGui.TableSetupColumn("House", ImGuiTableColumnFlags.WidthStretch, 0.6f);
             ImGui.TableSetupColumn("Subs", ImGuiTableColumnFlags.WidthStretch, 0.6f);
             ImGui.TableSetupColumn("Credits", ImGuiTableColumnFlags.WidthStretch, 1.0f);
-            if (plugin.Config.ShowAccountColumn)
+            if (cfg.ShowAccountColumn)
                 ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.0f);
 
             ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
+            if (cfg.ShowLoginButton) { ImGui.TableNextColumn(); ImGui.TextDisabled(""); }
             DrawSortHeader(SortCol.Character, "Character");
+            if (cfg.ShowRegionColumn) DrawSortHeader(SortCol.Region, "Region");
             DrawSortHeader(SortCol.World, "World");
             DrawSortHeader(SortCol.FreeCompany, "Free Company");
             DrawSortHeader(SortCol.Tag, "Tag");
@@ -141,16 +152,24 @@ public class MainWindow : Window
             DrawSortHeader(SortCol.House, "House");
             DrawSortHeader(SortCol.Subs, "Subs");
             DrawSortHeader(SortCol.Credits, "Credits");
-            if (plugin.Config.ShowAccountColumn)
-            {
-                ImGui.TableNextColumn();
-                ImGui.TextDisabled("Account");
-            }
+            if (cfg.ShowAccountColumn) { ImGui.TableNextColumn(); ImGui.TextDisabled("Account"); }
 
             foreach (var c in rows)
                 DrawCharacterRow(c);
 
             ImGui.EndTable();
+        }
+
+        // Expanded character detail full-width below the table.
+        if (expandedCid != 0)
+        {
+            var open = rows.Find(x => x.ContentId == expandedCid);
+            if (open != null)
+            {
+                ImGuiHelpers.ScaledDummy(4f);
+                ImGui.Separator();
+                DrawCharacterDetail(open);
+            }
         }
     }
 
@@ -174,8 +193,12 @@ public class MainWindow : Window
         public int SubCount;          // best subs count among members
         public bool SubsKnown;
         public string SubRunnerAccountKey = ""; // roaming path of the WorkshopEnabled char
+        public string FallbackAccountKey = "";  // any tracked member's account
         public string SubRunnerName = "";
         public System.Collections.Generic.List<CharacterRecord> Members = new();
+
+        public string EffectiveAccountKey =>
+            !string.IsNullOrEmpty(SubRunnerAccountKey) ? SubRunnerAccountKey : FallbackAccountKey;
     }
 
     private void DrawGrouped(System.Collections.Generic.List<CharacterRecord> rows)
@@ -214,16 +237,24 @@ public class MainWindow : Window
             // subrunner = the FC member flagged WorkshopEnabled in AutoRetainer.
             if (c.IsWorkshopRunner)
             {
-                g.SubRunnerAccountKey = c.AccountKey;
+                if (!string.IsNullOrEmpty(c.AccountKey)) g.SubRunnerAccountKey = c.AccountKey;
                 g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
             }
+            // Fallback: if we still have no account for this FC, use any member's
+            // known account (better than showing nothing).
+            if (string.IsNullOrEmpty(g.SubRunnerAccountKey) && !string.IsNullOrEmpty(c.AccountKey))
+                g.FallbackAccountKey = c.AccountKey;
         }
 
         var groups = new System.Collections.Generic.List<FcGroup>(map.Values);
         SortFcGroups(groups);
 
         var cfg = plugin.Config;
-        var cols = 10;
+        var showGo = cfg.ShowLoginButton || true; // Go (Lifestream-to-house) always useful
+        var showRegion = cfg.ShowRegionColumn;
+        // base columns: World, Account, FC, Tag, Level, Subs, House, Credits = 8
+        // + Go (always) + Region (optional) + Login (optional)
+        var cols = 8 + 1 + (showRegion ? 1 : 0) + (cfg.ShowLoginButton ? 1 : 0);
         const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH
             | ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY;
 
@@ -233,7 +264,10 @@ public class MainWindow : Window
         // Frozen header row.
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableSetupColumn("Go", ImGuiTableColumnFlags.WidthFixed, 28 * ImGuiHelpers.GlobalScale);
-        ImGui.TableSetupColumn("Region", ImGuiTableColumnFlags.WidthStretch, 0.7f);
+        if (cfg.ShowLoginButton)
+            ImGui.TableSetupColumn("Login", ImGuiTableColumnFlags.WidthFixed, 28 * ImGuiHelpers.GlobalScale);
+        if (showRegion)
+            ImGui.TableSetupColumn("Region", ImGuiTableColumnFlags.WidthStretch, 0.7f);
         ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.1f);
         ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.1f);
         ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.2f);
@@ -244,9 +278,9 @@ public class MainWindow : Window
         ImGui.TableSetupColumn("Credits", ImGuiTableColumnFlags.WidthStretch, 1.0f);
 
         ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
-        ImGui.TableNextColumn(); // Go (no sort)
-        ImGui.TextDisabled("");
-        DrawFcSortHeader(FcSortCol.Region, "Region");
+        ImGui.TableNextColumn(); ImGui.TextDisabled(""); // Go
+        if (cfg.ShowLoginButton) { ImGui.TableNextColumn(); ImGui.TextDisabled(""); }
+        if (showRegion) DrawFcSortHeader(FcSortCol.Region, "Region");
         DrawFcSortHeader(FcSortCol.World, "World");
         DrawFcSortHeader(FcSortCol.Account, "Account");
         DrawFcSortHeader(FcSortCol.Name, "Free Company");
@@ -292,7 +326,7 @@ public class MainWindow : Window
         {
             FcSortCol.Region => (a, b) => string.Compare(a.Region, b.Region, StringComparison.OrdinalIgnoreCase),
             FcSortCol.World => (a, b) => string.Compare(a.World, b.World, StringComparison.OrdinalIgnoreCase),
-            FcSortCol.Account => (a, b) => string.Compare(AccountAliasLabel(a.SubRunnerAccountKey), AccountAliasLabel(b.SubRunnerAccountKey), StringComparison.OrdinalIgnoreCase),
+            FcSortCol.Account => (a, b) => string.Compare(AccountAliasLabel(a.EffectiveAccountKey), AccountAliasLabel(b.EffectiveAccountKey), StringComparison.OrdinalIgnoreCase),
             FcSortCol.Name => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Tag => (a, b) => string.Compare(a.Tag, b.Tag, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Level => (a, b) => a.Level.CompareTo(b.Level),
@@ -301,7 +335,16 @@ public class MainWindow : Window
             FcSortCol.Credits => (a, b) => CreditsVal(a.Credits).CompareTo(CreditsVal(b.Credits)),
             _ => (a, b) => 0,
         };
-        list.Sort((a, b) => { var r = cmp(a, b); return fcSortAsc ? r : -r; });
+        list.Sort((a, b) =>
+        {
+            if (plugin.Config.SubsortByRegion && fcSort != FcSortCol.Region)
+            {
+                var rr = string.Compare(a.Region, b.Region, StringComparison.OrdinalIgnoreCase);
+                if (rr != 0) return rr; // primary: region grouping
+            }
+            var r = cmp(a, b);
+            return fcSortAsc ? r : -r;
+        });
     }
 
     private static long CreditsVal(string s)
@@ -320,34 +363,55 @@ public class MainWindow : Window
 
         ImGui.TableNextRow();
 
-        // Go (Lifestream) button — only when the FC has a house.
+        // Go (Lifestream-to-house) button — only when the FC has a house.
         ImGui.TableNextColumn();
         if (hasHouse && g.House != null && !g.House.IsApartment)
         {
-            if (ImGui.SmallButton($"\u27A4###go{g.FcId}")) // ➤ runner-ish glyph
+            if (ImGui.SmallButton($"\u27A4###go{g.FcId}")) // ➤ travel-to-house
                 PluginIpc.LifestreamGoToAddress(g.World, g.House.District, g.House.Ward, g.House.Plot);
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip($"Lifestream to {g.World} {g.House.District} W{g.House.Ward} P{g.House.Plot}");
         }
-        else
+        else ImGui.TextDisabled("");
+
+        // Login (door) button — logs into the sub-runner (or first member).
+        if (cfg.ShowLoginButton)
         {
-            ImGui.TextDisabled("");
+            ImGui.TableNextColumn();
+            var loginTarget = g.Members.Find(m => m.IsWorkshopRunner) ?? (g.Members.Count > 0 ? g.Members[0] : null);
+            if (loginTarget != null && !string.IsNullOrEmpty(loginTarget.CharacterName) && !string.IsNullOrEmpty(loginTarget.WorldName))
+            {
+                if (ImGui.SmallButton($"\uE03C###login{g.FcId}")) // door-ish glyph
+                    PluginIpc.LifestreamLogin(loginTarget.CharacterName, loginTarget.WorldName);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"Log into {loginTarget.CharacterName} @ {loginTarget.WorldName} (Lifestream)");
+            }
+            else ImGui.TextDisabled("");
         }
 
-        // Region (click to expand the FC).
-        ImGui.TableNextColumn();
+        // Region (click to expand) — or, if region hidden, the World cell carries the triangle.
         var tri = isOpen ? "\u25BC " : "\u25B6 ";
-        if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.Region) ? "-" : g.Region)}###fcrow{g.FcId}",
-                isOpen, ImGuiSelectableFlags.SpanAllColumns))
-            expandedFcId = isOpen ? 0 : g.FcId;
+        if (cfg.ShowRegionColumn)
+        {
+            ImGui.TableNextColumn();
+            if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.Region) ? "-" : g.Region)}###fcrow{g.FcId}",
+                    isOpen, ImGuiSelectableFlags.SpanAllColumns))
+                expandedFcId = isOpen ? 0 : g.FcId;
 
-        // World
-        ImGui.TableNextColumn();
-        ImGui.TextUnformatted(string.IsNullOrEmpty(g.World) ? "-" : g.World);
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(string.IsNullOrEmpty(g.World) ? "-" : g.World);
+        }
+        else
+        {
+            ImGui.TableNextColumn();
+            if (ImGui.Selectable($"{tri}{(string.IsNullOrEmpty(g.World) ? "-" : g.World)}###fcrow{g.FcId}",
+                    isOpen, ImGuiSelectableFlags.SpanAllColumns))
+                expandedFcId = isOpen ? 0 : g.FcId;
+        }
 
         // Account alias
         ImGui.TableNextColumn();
-        ImGui.TextUnformatted(AccountAliasLabel(g.SubRunnerAccountKey));
+        ImGui.TextUnformatted(AccountAliasLabel(g.EffectiveAccountKey));
 
         // FC Name
         ImGui.TableNextColumn();
@@ -391,8 +455,8 @@ public class MainWindow : Window
 
         // Additional info section.
         var runnerLabel = string.IsNullOrEmpty(g.SubRunnerName)
-            ? AccountAliasLabel(g.SubRunnerAccountKey)
-            : $"{g.SubRunnerName}  ({AccountAliasLabel(g.SubRunnerAccountKey)})";
+            ? AccountAliasLabel(g.EffectiveAccountKey)
+            : $"{g.SubRunnerName}  ({AccountAliasLabel(g.EffectiveAccountKey)})";
         ImGui.TextWrapped($"Sub-runner: {runnerLabel}");
 
         // Original winner — editable, pulled/stored on the first member.
@@ -484,7 +548,7 @@ public class MainWindow : Window
             {
                 sortColumn = col;
                 // Text columns default A→Z; numeric/boolean default to "high" first.
-                sortAscending = col is SortCol.Character or SortCol.World or SortCol.FreeCompany or SortCol.Tag;
+                sortAscending = col is SortCol.Character or SortCol.Region or SortCol.World or SortCol.FreeCompany or SortCol.Tag;
             }
         }
     }
@@ -497,6 +561,7 @@ public class MainWindow : Window
         Comparison<CharacterRecord> cmp = sortColumn switch
         {
             SortCol.Character => (a, b) => string.Compare(a.CharacterName, b.CharacterName, StringComparison.OrdinalIgnoreCase),
+            SortCol.Region => (a, b) => string.Compare(a.Fc?.Region ?? "", b.Fc?.Region ?? "", StringComparison.OrdinalIgnoreCase),
             SortCol.World => (a, b) => string.Compare(a.WorldName, b.WorldName, StringComparison.OrdinalIgnoreCase),
             SortCol.FreeCompany => (a, b) => string.Compare(a.Fc?.Name ?? "", b.Fc?.Name ?? "", StringComparison.OrdinalIgnoreCase),
             SortCol.Tag => (a, b) => string.Compare(a.Fc?.Tag ?? "", b.Fc?.Tag ?? "", StringComparison.OrdinalIgnoreCase),
@@ -509,6 +574,13 @@ public class MainWindow : Window
 
         list.Sort((a, b) =>
         {
+            if (plugin.Config.SubsortByRegion && sortColumn != SortCol.Region)
+            {
+                var ra = a.Fc?.Region ?? "";
+                var rb = b.Fc?.Region ?? "";
+                var rr = string.Compare(ra, rb, StringComparison.OrdinalIgnoreCase);
+                if (rr != 0) return rr;
+            }
             var r = cmp(a, b);
             return sortAscending ? r : -r;
         });
@@ -568,10 +640,25 @@ public class MainWindow : Window
 
     private void DrawCharacterRow(CharacterRecord c)
     {
+        var cfg = plugin.Config;
         var fc = c.Fc;
         var isExpanded = expandedCid == c.ContentId;
 
         ImGui.TableNextRow();
+
+        // Login (door) button (optional, first column).
+        if (cfg.ShowLoginButton)
+        {
+            ImGui.TableNextColumn();
+            if (!string.IsNullOrEmpty(c.CharacterName) && !string.IsNullOrEmpty(c.WorldName))
+            {
+                if (ImGui.SmallButton($"\uE03C###flogin{c.ContentId}"))
+                    PluginIpc.LifestreamLogin(c.CharacterName, c.WorldName);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"Log into {c.CharacterName} @ {c.WorldName} (Lifestream)");
+            }
+            else ImGui.TextDisabled("");
+        }
 
         // Character — clickable triangle to expand.
         ImGui.TableNextColumn();
@@ -580,6 +667,13 @@ public class MainWindow : Window
         if (ImGui.Selectable($"{tri}{charName}###row{c.ContentId}", isExpanded,
                 ImGuiSelectableFlags.SpanAllColumns))
             expandedCid = isExpanded ? 0 : c.ContentId;
+
+        // Region (optional)
+        if (cfg.ShowRegionColumn)
+        {
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(fc != null && !string.IsNullOrEmpty(fc.Region) ? fc.Region : "-");
+        }
 
         // World
         ImGui.TableNextColumn();
@@ -620,18 +714,10 @@ public class MainWindow : Window
         ImGui.TextUnformatted(fc != null && !string.IsNullOrEmpty(fc.CreditsText) ? fc.CreditsText : "-");
 
         // Account (optional)
-        if (plugin.Config.ShowAccountColumn)
+        if (cfg.ShowAccountColumn)
         {
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(AccountLabel(c));
-        }
-
-        // Per-row expanded detail, directly beneath this row (spans full width).
-        if (isExpanded)
-        {
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            DrawCharacterDetail(c);
         }
     }
 

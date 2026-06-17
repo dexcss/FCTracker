@@ -67,6 +67,29 @@ public class SettingsWindow : Window
                            "Time-in-FC is measured from when this plugin first saw the character, " +
                            "not a real join date.");
 
+        var showLogin = config.ShowLoginButton;
+        if (ImGui.Checkbox("Show login button (requires Lifestream)", ref showLogin))
+        {
+            config.ShowLoginButton = showLogin;
+            config.Save();
+        }
+        ImGui.TextDisabled("Adds a door button to log into a character via Lifestream's ConnectAndLogin.");
+
+        var showRegion = config.ShowRegionColumn;
+        if (ImGui.Checkbox("Show region column", ref showRegion))
+        {
+            config.ShowRegionColumn = showRegion;
+            config.Save();
+        }
+
+        var subsort = config.SubsortByRegion;
+        if (ImGui.Checkbox("Sub-sort by region (group regions together, then sort within)", ref subsort))
+        {
+            config.SubsortByRegion = subsort;
+            config.Save();
+        }
+        ImGui.TextDisabled("With this on, sorting by e.g. World keeps NA worlds together, then EU, etc.");
+
         ImGuiHelpers.ScaledDummy(6f);
 
         // --- Accounts ---

@@ -102,6 +102,18 @@ public static class PluginIpc
         catch { return false; }
     }
 
+    // Logs into a character from anywhere (connects, opens chara-select, logs in).
+    // Confirmed in Lifestream's IPCProvider: ConnectAndLogin(name, homeWorld).
+    public static bool LifestreamLogin(string charaName, string homeWorld)
+    {
+        try
+        {
+            return Pi.GetIpcSubscriber<string, string, bool>("Lifestream.ConnectAndLogin")
+                .InvokeFunc(charaName, homeWorld);
+        }
+        catch { return false; }
+    }
+
     // ---- reflection helpers (AR's OfflineCharacterData fields are public) ----
     private static ulong GetULong(Type t, object o, string field)
         => t.GetField(field)?.GetValue(o) is ulong v ? v : 0;

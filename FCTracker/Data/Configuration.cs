@@ -36,6 +36,11 @@ public class Configuration : IPluginConfiguration
     public bool ShowMemberFcRank = false;   // best-effort scrape of own FC rank
     public bool ShowFounderAndTime = false; // founder/original-winner + time-in-FC
 
+    // Optional columns (checkmark in settings).
+    public bool ShowLoginButton = false;    // door icon to log into a character (Lifestream)
+    public bool ShowRegionColumn = false;   // region column in both views
+    public bool SubsortByRegion = false;    // group rows by region, then secondary sort
+
     // Account aliases: maps a detected Dalamud roaming path -> a friendly name.
     // (ServiceAccount turned out to be the wrong axis — it's the paid +chars tier,
     // not the user's separate game accounts, which correspond to roaming paths.)
