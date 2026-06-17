@@ -41,6 +41,25 @@ public class Configuration : IPluginConfiguration
     public bool ShowRegionColumn = false;   // region column in both views
     public bool SubsortByRegion = false;    // group rows by region, then secondary sort
 
+    // Per-column visibility for the FC table. Defaults match the prior layout.
+    public bool ColTp = true;          // Lifestream-to-house button
+    public bool ColLogin = true;       // login (door) button column (also needs ShowLoginButton)
+    public bool ColRegion = false;     // mirrors ShowRegionColumn intent; kept separate per-toggle
+    public bool ColWorld = true;
+    public bool ColAccount = true;
+    public bool ColSubRunner = true;
+    public bool ColFc = true;
+    public bool ColTag = true;
+    public bool ColMembers = true;
+    public bool ColLevel = true;
+    public bool ColSubs = true;
+    public bool ColHouse = true;
+    public bool ColCredits = true;
+    public bool ColCustomName = false; // custom per-FC house/label name
+
+    // Per-FC custom names (keyed by the same stable FC key the UI uses).
+    public Dictionary<string, string> CustomFcNames = new();
+
     // Account aliases: maps a detected Dalamud roaming path -> a friendly name.
     // (ServiceAccount turned out to be the wrong axis — it's the paid +chars tier,
     // not the user's separate game accounts, which correspond to roaming paths.)

@@ -68,6 +68,28 @@ public class SettingsWindow : Window
 
         ImGuiHelpers.ScaledDummy(6f);
 
+        // --- Columns ---
+        ImGui.TextUnformatted("Columns");
+        ImGui.Separator();
+        ImGui.TextDisabled("Choose which columns appear in the FC table.");
+
+        ColumnToggle("TP (teleport-to-house button)", ref config.ColTp, config);
+        ColumnToggle("LOG (login button — also needs 'Show login button' above)", ref config.ColLogin, config);
+        ColumnToggle("Region", ref config.ColRegion, config);
+        ColumnToggle("World", ref config.ColWorld, config);
+        ColumnToggle("Account", ref config.ColAccount, config);
+        ColumnToggle("Sub-runner", ref config.ColSubRunner, config);
+        ColumnToggle("Custom name (per-FC label you can edit & sort by)", ref config.ColCustomName, config);
+        ColumnToggle("Free Company", ref config.ColFc, config);
+        ColumnToggle("Tag", ref config.ColTag, config);
+        ColumnToggle("Members", ref config.ColMembers, config);
+        ColumnToggle("Level", ref config.ColLevel, config);
+        ColumnToggle("Subs", ref config.ColSubs, config);
+        ColumnToggle("House", ref config.ColHouse, config);
+        ColumnToggle("Credits", ref config.ColCredits, config);
+
+        ImGuiHelpers.ScaledDummy(6f);
+
         // --- Accounts ---
         ImGui.TextUnformatted("Accounts");
         ImGui.Separator();
@@ -192,6 +214,12 @@ public class SettingsWindow : Window
         ImGui.TextUnformatted("Danger zone");
         ImGui.Separator();
         DrawResetEverything();
+    }
+
+    private static void ColumnToggle(string label, ref bool value, Configuration config)
+    {
+        if (ImGui.Checkbox(label, ref value))
+            config.Save();
     }
 
     private void DrawResetEverything()
