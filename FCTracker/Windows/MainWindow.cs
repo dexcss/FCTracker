@@ -244,7 +244,7 @@ public class MainWindow : Window
 
     // The full column order (enabled or not), honoring the user's saved order with
     // any unlisted columns appended in default order.
-    public static List<Col> OrderedAllColumns(Configuration cfg)
+    private static List<Col> OrderedAllColumns(Configuration cfg)
     {
         var byName = new Dictionary<string, Col>();
         foreach (var (col, name) in AllColumns) byName[name] = col;
