@@ -476,17 +476,20 @@ public class MainWindow : Window
             : $"{g.SubRunnerName}  ({AccountAliasLabel(g.EffectiveAccountKey)})";
         ImGui.TextWrapped($"Sub-runner: {runnerLabel}");
 
-        // Original winner — editable, pulled/stored on the first member.
+        // Original winner + time info — only when the optional toggle is on.
         var holder = g.Members[0];
-        var winner = holder.ManualHouseWinner;
-        ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
-        if (ImGui.InputText($"Original winner###winner{g.Key}", ref winner, 128))
+        if (cfg.ShowFounderAndTime)
         {
-            holder.ManualHouseWinner = winner;
-            plugin.PersistCharacter(holder);
+            var winner = holder.ManualHouseWinner;
+            ImGui.SetNextItemWidth(260 * ImGuiHelpers.GlobalScale);
+            if (ImGui.InputText($"Original winner###winner{g.Key}", ref winner, 128))
+            {
+                holder.ManualHouseWinner = winner;
+                plugin.PersistCharacter(holder);
+            }
+            ImGui.TextDisabled($"First registered: {ToLocal(EarliestFirstSeen(g))}");
         }
 
-        ImGui.TextDisabled($"First registered: {ToLocal(EarliestFirstSeen(g))}");
         if (g.Members[0].Fc != null)
             ImGui.TextDisabled($"Last data update: {ToLocal(g.Members[0].Fc!.LastUpdatedUtc)}");
 
@@ -497,12 +500,14 @@ public class MainWindow : Window
 
         // Characters table.
         ImGuiHelpers.ScaledDummy(4f);
-        if (ImGui.BeginTable($"##fcmembers{g.Key}", 3,
+        var memberCols = 2 + (cfg.ShowFounderAndTime ? 1 : 0);
+        if (ImGui.BeginTable($"##fcmembers{g.Key}", memberCols,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
             ImGui.TableSetupColumn("Character");
             ImGui.TableSetupColumn("Rank in FC");
-            ImGui.TableSetupColumn("Days in FC");
+            if (cfg.ShowFounderAndTime)
+                ImGui.TableSetupColumn("Days in FC");
             ImGui.TableHeadersRow();
 
             foreach (var m in g.Members)
@@ -516,10 +521,13 @@ public class MainWindow : Window
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(cfg.ShowMemberFcRank && !string.IsNullOrEmpty(m.MyFcRank) ? m.MyFcRank : "-");
 
-                ImGui.TableNextColumn();
-                var days = (int)(DateTime.UtcNow - m.FirstSeenInFcUtc).TotalDays;
-                if (days <= 30) ImGui.TextColored(new Vector4(0.85f, 0.5f, 0.5f, 1f), days.ToString());
-                else ImGui.TextUnformatted(days.ToString());
+                if (cfg.ShowFounderAndTime)
+                {
+                    ImGui.TableNextColumn();
+                    var days = (int)(DateTime.UtcNow - m.FirstSeenInFcUtc).TotalDays;
+                    if (days <= 30) ImGui.TextColored(new Vector4(0.85f, 0.5f, 0.5f, 1f), days.ToString());
+                    else ImGui.TextUnformatted(days.ToString());
+                }
             }
             ImGui.EndTable();
         }

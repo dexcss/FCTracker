@@ -424,21 +424,31 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     // House-winner auto-detect. When you win a housing lottery, interacting with the
-    // results placard opens HousingSignBoard, then a SelectYesno whose prompt text
-    // contains "Congratulations". If we see that while a housing addon is open, we
-    // record the current character as the house winner for their FC.
+    // results placard opens a SelectYesno whose prompt congratulates you on the win.
+    // The HousingSignBoard addon may or may not still be open by the time this fires,
+    // so we treat it as a hint, not a hard requirement, and match a few win phrases.
     private void OnSelectYesno(AddonEvent type, AddonArgs args)
     {
         try
         {
-            // Only meaningful right after a housing placard.
-            nint signboard = GameGui.GetAddonByName("HousingSignBoard", 1);
-            var signboardOpen = signboard != nint.Zero;
-            if (!signboardOpen) return;
-
             var text = GameReader.ReadSelectYesnoPrompt(args.Addon);
             if (string.IsNullOrEmpty(text)) return;
-            if (text.IndexOf("Congratulations", StringComparison.OrdinalIgnoreCase) < 0) return;
+
+            // Must look like a housing-lottery win. Require a win word AND a housing
+            // context word so unrelated "Congratulations" prompts don't trigger.
+            var lower = text.ToLowerInvariant();
+            var winWord = lower.Contains("congratulations") || lower.Contains("won the lottery")
+                          || lower.Contains("winning");
+            var housingWord = lower.Contains("plot") || lower.Contains("estate")
+                              || lower.Contains("house") || lower.Contains("land")
+                              || lower.Contains("residential");
+
+            // If the sign board is open, that alone is enough of a housing context.
+            nint signboard = GameGui.GetAddonByName("HousingSignBoard", 1);
+            var signboardOpen = signboard != nint.Zero;
+
+            if (!winWord) return;
+            if (!housingWord && !signboardOpen) return;
 
             var contentId = PlayerState.ContentId;
             if (contentId == 0) return;
@@ -449,12 +459,14 @@ public sealed class Plugin : IDalamudPlugin
                 ? rec.CharacterName
                 : $"{rec.CharacterName} @ {rec.WorldName}";
 
-            // Only set if empty (don't overwrite a manual entry).
+            var stamp = $"{winner} (auto-detected {DateTime.Now:yyyy-MM-dd})";
+
+            // Store on the character record, and only if not manually set already.
             if (string.IsNullOrEmpty(rec.ManualHouseWinner))
             {
-                rec.ManualHouseWinner = $"{winner} (auto-detected {DateTime.Now:yyyy-MM-dd})";
+                rec.ManualHouseWinner = stamp;
                 PersistCharacter(rec);
-                Log.Info($"FC Tracker: auto-recorded house winner for {winner}");
+                Log.Info($"FC Tracker: auto-recorded house winner: {winner}");
             }
         }
         catch (Exception ex)
