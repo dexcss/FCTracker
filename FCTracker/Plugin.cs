@@ -251,6 +251,15 @@ public sealed class Plugin : IDalamudPlugin
                     rec.IsWorkshopRunner = info.WorkshopEnabled;
                     dirty = true;
                 }
+                // Latest submarine return time (max across this char's subs).
+                uint latest = 0;
+                foreach (var rt in info.SubReturnTimes)
+                    if (rt > latest) latest = rt;
+                if (rec.SubReturnUnix != latest)
+                {
+                    rec.SubReturnUnix = latest;
+                    dirty = true;
+                }
             }
             if (dirty && Store == null) Config.Save();
         }

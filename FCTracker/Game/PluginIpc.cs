@@ -43,6 +43,22 @@ public static class PluginIpc
             string name = GetString(t, data, "Name");
             string world = GetString(t, data, "World");
 
+            // Submarine return times: OfflineSubmarineData is a List<OfflineVesselData>
+            // where each has a uint ReturnTime (unix seconds). Read them reflectively.
+            var subReturns = new List<uint>();
+            try
+            {
+                if (t.GetField("OfflineSubmarineData")?.GetValue(data) is System.Collections.IEnumerable subs)
+                {
+                    foreach (var s in subs)
+                    {
+                        var rt = s.GetType().GetField("ReturnTime")?.GetValue(s);
+                        if (rt is uint u) subReturns.Add(u);
+                    }
+                }
+            }
+            catch { /* ignore */ }
+
             return new ArCharInfo
             {
                 Cid = cid,
@@ -50,6 +66,7 @@ public static class PluginIpc
                 WorkshopEnabled = workshopEnabled,
                 Name = name,
                 World = world,
+                SubReturnTimes = subReturns,
             };
         }
         catch { return null; }
@@ -130,4 +147,5 @@ public class ArCharInfo
     public bool WorkshopEnabled;
     public string Name = string.Empty;
     public string World = string.Empty;
+    public List<uint> SubReturnTimes = new();
 }

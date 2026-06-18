@@ -164,6 +164,11 @@ public class CharacterRecord
     // FC's sub-runner)? Read via IPC; defaults false.
     public bool IsWorkshopRunner = false;
 
+    // Latest submarine return time (unix seconds) from AutoRetainer's offline data.
+    // 0 = unknown / no subs. AR keeps this current for all tracked characters, which
+    // is why it works across accounts (the game only exposes the logged-in char).
+    public uint SubReturnUnix = 0;
+
     // The character's own rank within the FC (e.g. "Master", "Officer"). Not in any
     // clean struct — only captured by an optional, best-effort scrape of the FC
     // Members window. May be empty.

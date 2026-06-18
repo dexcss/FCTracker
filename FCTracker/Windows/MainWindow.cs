@@ -33,7 +33,7 @@ public class MainWindow : Window
     private string expandedFcKey = "";
 
     // ---- FC sort ----
-    private enum FcSortCol { Region, World, Account, SubRunner, CustomName, Name, Tag, Members, Level, Subs, House, Credits }
+    private enum FcSortCol { Region, World, Account, SubRunner, CustomName, Name, Tag, Members, Level, Subs, Returns, House, Credits }
     private FcSortCol fcSort = FcSortCol.Name;
     private bool fcSortAsc = true;
 
@@ -52,7 +52,10 @@ public class MainWindow : Window
         public HouseRecord? House;
         public int SubCount;
         public bool SubsKnown;
+        public uint SubReturnUnix;        // latest sub return (unix secs), from AR
+        public bool SubReturnKnown;
         public string SubRunnerName = "";
+        public bool SubRunnerIsExplicit;  // true if from AR WorkshopEnabled (vs. sub-activity fallback)
         public string SubRunnerAccountKey = "";
         public string FallbackAccountKey = "";
         public List<CharacterRecord> TrackedMembers = new();
@@ -147,8 +150,28 @@ public class MainWindow : Window
 
             if (c.IsWorkshopRunner)
             {
+                // Explicit AR workshop-runner always wins.
                 g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+                g.SubRunnerIsExplicit = true;
                 if (!string.IsNullOrEmpty(c.AccountKey)) g.SubRunnerAccountKey = c.AccountKey;
+                if (c.SubReturnUnix > 0) { g.SubReturnUnix = c.SubReturnUnix; g.SubReturnKnown = true; }
+            }
+            else if (!g.SubRunnerIsExplicit && c.SubReturnUnix > 0)
+            {
+                // Fallback: no AR-flagged runner yet — use whoever has subs out. If
+                // several, keep the one with the latest return (most recently sent).
+                if (string.IsNullOrEmpty(g.SubRunnerName) || c.SubReturnUnix > g.SubReturnUnix)
+                {
+                    g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+                    if (!string.IsNullOrEmpty(c.AccountKey)) g.SubRunnerAccountKey = c.AccountKey;
+                }
+            }
+
+            // Track the FC's latest sub return regardless of who the runner is.
+            if (c.SubReturnUnix > g.SubReturnUnix)
+            {
+                g.SubReturnUnix = c.SubReturnUnix;
+                g.SubReturnKnown = true;
             }
             if (string.IsNullOrEmpty(g.FallbackAccountKey) && !string.IsNullOrEmpty(c.AccountKey))
                 g.FallbackAccountKey = c.AccountKey;
@@ -188,6 +211,7 @@ public class MainWindow : Window
             FcSortCol.Members => (a, b) => a.Members.CompareTo(b.Members),
             FcSortCol.Level => (a, b) => a.Level.CompareTo(b.Level),
             FcSortCol.Subs => (a, b) => a.SubCount.CompareTo(b.SubCount),
+            FcSortCol.Returns => (a, b) => ReturnSortVal(a).CompareTo(ReturnSortVal(b)),
             FcSortCol.House => (a, b) => (a.House?.HasHouse == true ? 1 : 0).CompareTo(b.House?.HasHouse == true ? 1 : 0),
             FcSortCol.Credits => (a, b) => CreditsVal(a.Credits).CompareTo(CreditsVal(b.Credits)),
             _ => (a, b) => 0,
@@ -211,8 +235,13 @@ public class MainWindow : Window
         return long.TryParse(s.Replace(",", "").Replace(".", "").Replace(" ", ""), out var v) ? v : -1;
     }
 
+    // Sort key for the Returns column: unknown sorts last; otherwise by return time
+    // (soonest = smallest). "Back" (past) times naturally sort before pending ones.
+    private static long ReturnSortVal(FcGroup g)
+        => g.SubReturnKnown ? g.SubReturnUnix : long.MaxValue;
+
     // Column identity for visibility + ordering.
-    private enum Col { Tp, Login, Region, World, Account, SubRunner, CustomName, Fc, Tag, Members, Level, Subs, House, Credits }
+    private enum Col { Tp, Login, Region, World, Account, SubRunner, CustomName, Fc, Tag, Members, Level, Subs, Returns, House, Credits }
 
     // Stable string name per column (used for the saved order list).
     private static readonly (Col col, string name)[] AllColumns =
@@ -220,7 +249,7 @@ public class MainWindow : Window
         (Col.Tp, "TP"), (Col.Login, "LOG"), (Col.Region, "Region"), (Col.World, "World"),
         (Col.Account, "Account"), (Col.SubRunner, "Sub-runner"), (Col.CustomName, "Custom name"),
         (Col.Fc, "Free Company"), (Col.Tag, "Tag"), (Col.Members, "Members"), (Col.Level, "Level"),
-        (Col.Subs, "Subs"), (Col.House, "House"), (Col.Credits, "Credits"),
+        (Col.Subs, "Subs"), (Col.Returns, "Returns"), (Col.House, "House"), (Col.Credits, "Credits"),
     };
 
     private static bool IsColEnabled(Col c, Configuration cfg) => c switch
@@ -237,6 +266,7 @@ public class MainWindow : Window
         Col.Members => cfg.ColMembers,
         Col.Level => cfg.ColLevel,
         Col.Subs => cfg.ColSubs,
+        Col.Returns => cfg.ColReturns,
         Col.House => cfg.ColHouse,
         Col.Credits => cfg.ColCredits,
         _ => false,
@@ -349,6 +379,7 @@ public class MainWindow : Window
             case Col.Members: ImGui.TableSetupColumn("Members", ImGuiTableColumnFlags.WidthStretch, 0.7f); break;
             case Col.Level: ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthStretch, 0.6f); break;
             case Col.Subs: ImGui.TableSetupColumn("Subs", ImGuiTableColumnFlags.WidthStretch, 0.6f); break;
+            case Col.Returns: ImGui.TableSetupColumn("Returns", ImGuiTableColumnFlags.WidthStretch, 1.0f); break;
             case Col.House: ImGui.TableSetupColumn("House", ImGuiTableColumnFlags.WidthStretch, 1.5f); break;
             case Col.Credits: ImGui.TableSetupColumn("Credits", ImGuiTableColumnFlags.WidthStretch, 1.0f); break;
         }
@@ -370,6 +401,7 @@ public class MainWindow : Window
             case Col.Members: DrawSortHeader(FcSortCol.Members, "Members"); break;
             case Col.Level: DrawSortHeader(FcSortCol.Level, "Level"); break;
             case Col.Subs: DrawSortHeader(FcSortCol.Subs, "Subs"); break;
+            case Col.Returns: DrawSortHeader(FcSortCol.Returns, "Returns"); break;
             case Col.House: DrawSortHeader(FcSortCol.House, "House"); break;
             case Col.Credits: DrawSortHeader(FcSortCol.Credits, "Credits"); break;
         }
@@ -468,6 +500,19 @@ public class MainWindow : Window
                     if (!hasHouse) ImGui.TextColored(grey, "-");
                     else if (!g.SubsKnown) ImGui.TextColored(grey, "?/4");
                     else ImGui.TextColored(g.SubCount == 0 ? red : green, $"{g.SubCount}/4");
+                    break;
+
+                case Col.Returns:
+                    if (!g.SubReturnKnown || g.SubReturnUnix == 0)
+                    {
+                        ImGui.TextColored(grey, "-");
+                    }
+                    else
+                    {
+                        var remaining = g.SubReturnUnix - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        if (remaining <= 0) ImGui.TextColored(green, "Back");
+                        else ImGui.TextColored(new Vector4(0.85f, 0.8f, 0.45f, 1f), FormatCountdown(remaining));
+                    }
                     break;
 
                 case Col.House:
@@ -661,6 +706,15 @@ public class MainWindow : Window
             plugin.ClearAll();
             pendingClearAll = false;
         }
+    }
+
+    private static string FormatCountdown(long seconds)
+    {
+        if (seconds < 0) seconds = 0;
+        var ts = TimeSpan.FromSeconds(seconds);
+        if (ts.TotalDays >= 1) return $"{(int)ts.TotalDays}d {ts.Hours}h";
+        if (ts.TotalHours >= 1) return $"{ts.Hours}h {ts.Minutes}m";
+        return $"{ts.Minutes}m";
     }
 
     private static string ToLocal(DateTime utc) => utc.ToLocalTime().ToString("g");

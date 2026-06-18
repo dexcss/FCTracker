@@ -61,6 +61,15 @@ public class SettingsWindow : Window
         ImGui.TextDisabled("Off = columns auto-fit the window. On = drag column borders yourself " +
                            "(widths stay put and won't auto-reflow when the window resizes).");
 
+        var autoOpen = config.AutoOpenFcOnLogin;
+        if (ImGui.Checkbox("Auto-open FC window on login when AutoRetainer multimode is on", ref autoOpen))
+        {
+            config.AutoOpenFcOnLogin = autoOpen;
+            config.Save();
+        }
+        ImGui.TextDisabled("Briefly opens (and closes) the FC window a few seconds after login to refresh " +
+                           "level/credits/house. The window flickers on screen when this fires. Off by default.");
+
         ImGuiHelpers.ScaledDummy(6f);
 
         // --- Columns ---
@@ -143,16 +152,6 @@ public class SettingsWindow : Window
             }
             ImGui.EndTable();
         }
-
-        ImGuiHelpers.ScaledDummy(4f);
-        var autoOpen = config.AutoOpenFcOnLogin;
-        if (ImGui.Checkbox("Auto-open FC window on login when AutoRetainer multimode is on", ref autoOpen))
-        {
-            config.AutoOpenFcOnLogin = autoOpen;
-            config.Save();
-        }
-        ImGui.TextDisabled("Briefly opens (and closes) the FC window a few seconds after login to refresh " +
-                           "level/credits/house. The window flickers on screen when this fires. Off by default.");
 
         ImGuiHelpers.ScaledDummy(6f);
 
@@ -242,6 +241,7 @@ public class SettingsWindow : Window
         "Members" => c.ColMembers,
         "Level" => c.ColLevel,
         "Subs" => c.ColSubs,
+        "Returns" => c.ColReturns,
         "House" => c.ColHouse,
         "Credits" => c.ColCredits,
         _ => false,
@@ -263,6 +263,7 @@ public class SettingsWindow : Window
             case "Members": c.ColMembers = v; break;
             case "Level": c.ColLevel = v; break;
             case "Subs": c.ColSubs = v; break;
+            case "Returns": c.ColReturns = v; break;
             case "House": c.ColHouse = v; break;
             case "Credits": c.ColCredits = v; break;
         }

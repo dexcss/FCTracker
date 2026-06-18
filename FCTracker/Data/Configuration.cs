@@ -54,6 +54,7 @@ public class Configuration : IPluginConfiguration
     public bool ColMembers = true;
     public bool ColLevel = true;
     public bool ColSubs = true;
+    public bool ColReturns = true;     // submarine return timer (from AutoRetainer)
     public bool ColHouse = true;
     public bool ColCredits = true;
     public bool ColCustomName = false; // custom per-FC house/label name
