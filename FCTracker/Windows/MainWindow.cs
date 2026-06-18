@@ -190,7 +190,7 @@ public class MainWindow : Window
             if (c.IsWorkshopRunner)
             {
                 // Explicit AR workshop-runner always wins.
-                g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+                g.SubRunnerName = c.CharacterName;
                 g.SubRunnerIsExplicit = true;
                 if (!string.IsNullOrEmpty(c.AccountKey)) g.SubRunnerAccountKey = c.AccountKey;
                 if (c.SubReturnUnix > g.SubReturnUnix) { g.SubReturnUnix = c.SubReturnUnix; }
@@ -204,7 +204,7 @@ public class MainWindow : Window
                 // have a return time yet.
                 if (string.IsNullOrEmpty(g.SubRunnerName) || c.SubReturnUnix > g.SubReturnUnix)
                 {
-                    g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+                    g.SubRunnerName = c.CharacterName;
                     if (!string.IsNullOrEmpty(c.AccountKey)) g.SubRunnerAccountKey = c.AccountKey;
                 }
             }
