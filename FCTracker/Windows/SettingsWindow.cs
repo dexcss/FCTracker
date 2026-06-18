@@ -75,7 +75,8 @@ public class SettingsWindow : Window
         // --- Columns ---
         ImGui.TextUnformatted("Columns");
         ImGui.Separator();
-        ImGui.TextDisabled("Check to show. Use the arrows to reorder (top = leftmost).");
+        ImGui.TextDisabled("Arrows reorder (top = leftmost). Checkbox shows/hides.");
+        ImGuiHelpers.ScaledDummy(2f);
 
         var order = MainWindow.OrderedColumnNames(config);
         var moved = false;
@@ -84,6 +85,31 @@ public class SettingsWindow : Window
             var name = order[i];
             ImGui.PushID($"col{i}");
 
+            // Up / down arrows on the LEFT.
+            var atTop = i == 0;
+            var atBottom = i == order.Count - 1;
+
+            if (atTop) ImGui.BeginDisabled();
+            if (ImGui.ArrowButton("up", ImGuiDir.Up) && !atTop)
+            {
+                MoveColumn(config, order, i, i - 1);
+                config.Save();
+                moved = true;
+            }
+            if (atTop) ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            if (atBottom) ImGui.BeginDisabled();
+            if (ImGui.ArrowButton("down", ImGuiDir.Down) && !atBottom)
+            {
+                MoveColumn(config, order, i, i + 1);
+                config.Save();
+                moved = true;
+            }
+            if (atBottom) ImGui.EndDisabled();
+
+            // Checkbox + label after the arrows.
+            ImGui.SameLine();
             var enabled = GetColEnabled(config, name);
             if (ImGui.Checkbox(name, ref enabled))
             {
@@ -91,22 +117,15 @@ public class SettingsWindow : Window
                 config.Save();
             }
 
-            ImGui.SameLine(ImGui.GetContentRegionAvail().X - 60 * ImGuiHelpers.GlobalScale);
-            if (ImGui.ArrowButton("up", ImGuiDir.Up) && i > 0)
-            {
-                MoveColumn(config, order, i, i - 1);
-                config.Save();
-                moved = true;
-            }
-            ImGui.SameLine();
-            if (ImGui.ArrowButton("down", ImGuiDir.Down) && i < order.Count - 1)
-            {
-                MoveColumn(config, order, i, i + 1);
-                config.Save();
-                moved = true;
-            }
-
             ImGui.PopID();
+
+            // Light separator between rows (not after the last).
+            if (i < order.Count - 1)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Separator, new Vector4(1f, 1f, 1f, 0.08f));
+                ImGui.Separator();
+                ImGui.PopStyleColor();
+            }
         }
 
         ImGuiHelpers.ScaledDummy(6f);
