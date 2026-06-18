@@ -38,7 +38,7 @@ public class MainWindow : Window
     private DateTime loginResultUntil = DateTime.MinValue;
 
     // ---- FC sort ----
-    private enum FcSortCol { Region, World, Account, SubRunner, CustomName, Name, Tag, Members, Level, Subs, Returns, House, Credits }
+    private enum FcSortCol { Region, World, Account, SubRunner, Character, CustomName, Name, Tag, Members, Level, Subs, Returns, House, Credits }
     private FcSortCol fcSort = FcSortCol.Name;
     private bool fcSortAsc = true;
 
@@ -46,6 +46,7 @@ public class MainWindow : Window
     private class FcGroup
     {
         public string Key = "";
+        public bool IsLooseCharacter;  // true = a character with no FC (its own row)
         public ulong FcId;
         public string Name = "";
         public string Tag = "";
@@ -60,6 +61,7 @@ public class MainWindow : Window
         public uint SubReturnUnix;        // latest sub return (unix secs), from AR
         public bool SubReturnKnown;
         public string SubRunnerName = "";
+        public string FirstCharacterName = "";  // first character seen attached to this FC
         public bool SubRunnerIsExplicit;  // true if from AR WorkshopEnabled (vs. sub-activity fallback)
         public string SubRunnerAccountKey = "";
         public string FallbackAccountKey = "";
@@ -131,17 +133,22 @@ public class MainWindow : Window
         foreach (var c in chars)
         {
             var fc = c.Fc;
+            var hasFc = fc != null && (fc.FreeCompanyId != 0 || !string.IsNullOrEmpty(fc.Name));
+            // Characters in an FC group under that FC. Characters with NO FC each get
+            // their own row (keyed by content id) so every account's loose characters
+            // are individually visible.
             var key = fc != null && fc.FreeCompanyId != 0 ? fc.FreeCompanyId.ToString()
                     : fc != null && !string.IsNullOrEmpty(fc.Name) ? "name:" + fc.Name
-                    : "none:" + (string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName);
+                    : "none:" + c.ContentId;
 
             if (!map.TryGetValue(key, out var g))
             {
                 map[key] = g = new FcGroup
                 {
                     Key = key,
+                    IsLooseCharacter = !hasFc,
                     FcId = fc?.FreeCompanyId ?? 0,
-                    Name = fc?.Name ?? $"Not in an FC ({(string.IsNullOrEmpty(c.WorldName) ? "?" : c.WorldName)})",
+                    Name = fc?.Name ?? "(no FC)",
                     Tag = fc?.Tag ?? "",
                     Region = fc?.Region ?? "",
                     World = c.WorldName,
@@ -153,6 +160,8 @@ public class MainWindow : Window
             }
 
             g.TrackedMembers.Add(c);
+            if (string.IsNullOrEmpty(g.FirstCharacterName) && !string.IsNullOrEmpty(c.CharacterName))
+                g.FirstCharacterName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
 
             if (c.VesselsLastUpdatedUtc != null)
             {
@@ -217,6 +226,7 @@ public class MainWindow : Window
             FcSortCol.World => (a, b) => string.Compare(a.World, b.World, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Account => (a, b) => string.Compare(AccountAliasLabel(a.EffectiveAccountKey), AccountAliasLabel(b.EffectiveAccountKey), StringComparison.OrdinalIgnoreCase),
             FcSortCol.SubRunner => (a, b) => string.Compare(a.SubRunnerName, b.SubRunnerName, StringComparison.OrdinalIgnoreCase),
+            FcSortCol.Character => (a, b) => string.Compare(a.FirstCharacterName, b.FirstCharacterName, StringComparison.OrdinalIgnoreCase),
             FcSortCol.CustomName => (a, b) => string.Compare(CustomName(a), CustomName(b), StringComparison.OrdinalIgnoreCase),
             FcSortCol.Name => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Tag => (a, b) => string.Compare(a.Tag, b.Tag, StringComparison.OrdinalIgnoreCase),
@@ -231,6 +241,10 @@ public class MainWindow : Window
 
         list.Sort((a, b) =>
         {
+            // FC rows always come before loose (no-FC) character rows.
+            if (a.IsLooseCharacter != b.IsLooseCharacter)
+                return a.IsLooseCharacter ? 1 : -1;
+
             if (plugin.Config.SubsortByRegion && fcSort != FcSortCol.Region)
             {
                 var rr = string.Compare(a.Region, b.Region, StringComparison.OrdinalIgnoreCase);
@@ -253,13 +267,14 @@ public class MainWindow : Window
         => g.SubReturnKnown ? g.SubReturnUnix : long.MaxValue;
 
     // Column identity for visibility + ordering.
-    private enum Col { Tp, Login, Region, World, Account, SubRunner, CustomName, Fc, Tag, Members, Level, Subs, Returns, House, Credits }
+    private enum Col { Tp, Login, Region, World, Account, SubRunner, Character, CustomName, Fc, Tag, Members, Level, Subs, Returns, House, Credits }
 
     // Stable string name per column (used for the saved order list).
     private static readonly (Col col, string name)[] AllColumns =
     {
         (Col.Tp, "TP"), (Col.Login, "LOG"), (Col.Region, "Region"), (Col.World, "World"),
-        (Col.Account, "Account"), (Col.SubRunner, "Sub-runner"), (Col.CustomName, "Custom name"),
+        (Col.Account, "Account"), (Col.SubRunner, "Sub-runner"), (Col.Character, "Character"),
+        (Col.CustomName, "Custom name"),
         (Col.Fc, "Free Company"), (Col.Tag, "Tag"), (Col.Members, "Members"), (Col.Level, "Level"),
         (Col.Subs, "Subs"), (Col.Returns, "Returns"), (Col.House, "House"), (Col.Credits, "Credits"),
     };
@@ -272,6 +287,7 @@ public class MainWindow : Window
         Col.World => cfg.ColWorld,
         Col.Account => cfg.ColAccount,
         Col.SubRunner => cfg.ColSubRunner,
+        Col.Character => cfg.ColCharacter,
         Col.CustomName => cfg.ColCustomName,
         Col.Fc => cfg.ColFc,
         Col.Tag => cfg.ColTag,
@@ -385,6 +401,7 @@ public class MainWindow : Window
             case Col.World: ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.Account: ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.SubRunner: ImGui.TableSetupColumn("Sub-runner", ImGuiTableColumnFlags.WidthStretch, 1.8f); break;
+            case Col.Character: ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch, 1.8f); break;
             case Col.CustomName: ImGui.TableSetupColumn("Nickname", ImGuiTableColumnFlags.WidthStretch, 1.4f); break;
             case Col.Fc: ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.0f); break;
             case Col.Tag: ImGui.TableSetupColumn("Tag", ImGuiTableColumnFlags.WidthStretch, 0.7f); break;
@@ -407,6 +424,7 @@ public class MainWindow : Window
             case Col.World: DrawSortHeader(FcSortCol.World, "World"); break;
             case Col.Account: DrawSortHeader(FcSortCol.Account, "Account"); break;
             case Col.SubRunner: DrawSortHeader(FcSortCol.SubRunner, "Sub-runner"); break;
+            case Col.Character: DrawSortHeader(FcSortCol.Character, "Character"); break;
             case Col.CustomName: DrawSortHeader(FcSortCol.CustomName, "Nickname"); break;
             case Col.Fc: DrawSortHeader(FcSortCol.Name, "Free Company"); break;
             case Col.Tag: DrawSortHeader(FcSortCol.Tag, "Tag"); break;
@@ -430,7 +448,7 @@ public class MainWindow : Window
             {
                 fcSort = col;
                 fcSortAsc = col is FcSortCol.Region or FcSortCol.World or FcSortCol.Account
-                    or FcSortCol.SubRunner or FcSortCol.CustomName or FcSortCol.Name or FcSortCol.Tag;
+                    or FcSortCol.SubRunner or FcSortCol.Character or FcSortCol.CustomName or FcSortCol.Name or FcSortCol.Tag;
             }
         }
     }
@@ -494,6 +512,9 @@ public class MainWindow : Window
                     break;
                 case Col.SubRunner:
                     ExpandableCell(g, c == triCol, isOpen, tri, string.IsNullOrEmpty(g.SubRunnerName) ? "-" : g.SubRunnerName);
+                    break;
+                case Col.Character:
+                    ExpandableCell(g, c == triCol, isOpen, tri, string.IsNullOrEmpty(g.FirstCharacterName) ? "-" : g.FirstCharacterName);
                     break;
                 case Col.CustomName:
                     ExpandableCell(g, c == triCol, isOpen, tri, CustomName(g));

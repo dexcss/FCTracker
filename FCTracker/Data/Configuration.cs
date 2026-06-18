@@ -49,6 +49,7 @@ public class Configuration : IPluginConfiguration
     public bool ColWorld = true;
     public bool ColAccount = true;
     public bool ColSubRunner = true;
+    public bool ColCharacter = false;  // character name (for no-FC rows; sub-runner on FC rows)
     public bool ColFc = true;
     public bool ColTag = true;
     public bool ColMembers = true;

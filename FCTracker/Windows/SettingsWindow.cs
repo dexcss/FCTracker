@@ -254,6 +254,7 @@ public class SettingsWindow : Window
         "World" => c.ColWorld,
         "Account" => c.ColAccount,
         "Sub-runner" => c.ColSubRunner,
+        "Character" => c.ColCharacter,
         "Custom name" => c.ColCustomName,
         "Free Company" => c.ColFc,
         "Tag" => c.ColTag,
@@ -276,6 +277,7 @@ public class SettingsWindow : Window
             case "World": c.ColWorld = v; break;
             case "Account": c.ColAccount = v; break;
             case "Sub-runner": c.ColSubRunner = v; break;
+            case "Character": c.ColCharacter = v; break;
             case "Custom name": c.ColCustomName = v; break;
             case "Free Company": c.ColFc = v; break;
             case "Tag": c.ColTag = v; break;
