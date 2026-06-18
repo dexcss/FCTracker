@@ -27,10 +27,15 @@ public class MainWindow : Window
     // Deferred actions (applied after the draw loop).
     private ulong pendingDeleteCid;
     private ulong pendingClearFcCid;
+    private readonly List<ulong> pendingClearFcCids = new();
     private bool pendingClearAll;
 
     private string search = string.Empty;
     private string expandedFcKey = "";
+
+    // Transient feedback from the login button (shown briefly in the top bar).
+    private string loginResult = "";
+    private DateTime loginResultUntil = DateTime.MinValue;
 
     // ---- FC sort ----
     private enum FcSortCol { Region, World, Account, SubRunner, CustomName, Name, Tag, Members, Level, Subs, Returns, House, Credits }
@@ -108,6 +113,13 @@ public class MainWindow : Window
 
         ImGui.SetNextItemWidth(-1);
         ImGui.InputTextWithHint("##search", "Search FC, tag, world, or character (e.g. \"ultr\")...", ref search, 64);
+
+        // Transient login feedback.
+        if (!string.IsNullOrEmpty(loginResult) && DateTime.UtcNow < loginResultUntil)
+            ImGui.TextColored(new Vector4(0.95f, 0.75f, 0.4f, 1f), loginResult);
+        else if (DateTime.UtcNow >= loginResultUntil)
+            loginResult = "";
+
         ImGuiHelpers.ScaledDummy(2f);
     }
 
@@ -457,9 +469,15 @@ public class MainWindow : Window
                     if (target != null && !string.IsNullOrEmpty(target.CharacterName) && !string.IsNullOrEmpty(target.WorldName))
                     {
                         if (ImGui.SmallButton($"{LoginGlyph}###login{g.Key}"))
-                            PluginIpc.LifestreamLogin(target.CharacterName, target.WorldName);
+                        {
+                            var r = plugin.RelogTo(target.CharacterName, target.WorldName);
+                            loginResult = string.IsNullOrEmpty(r)
+                                ? $"Relogging to {target.CharacterName} @ {target.WorldName}..."
+                                : r;
+                            loginResultUntil = DateTime.UtcNow.AddSeconds(8);
+                        }
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip($"Log into {target.CharacterName} @ {target.WorldName} (Lifestream)");
+                            ImGui.SetTooltip($"Log into {target.CharacterName} @ {target.WorldName} (via AutoRetainer relog)");
                     }
                     else ImGui.TextDisabled("");
                     break;
@@ -652,6 +670,34 @@ public class MainWindow : Window
             plugin.PersistCharacter(holder);
         }
 
+        ImGuiHelpers.ScaledDummy(6f);
+        ImGui.Separator();
+
+        // Per-FC delete: clears this FC's tracked data for all its tracked members.
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.5f, 0.2f, 0.2f, 1f));
+        if (ImGui.Button($"Remove this FC's data###delfc{g.Key}"))
+            ImGui.OpenPopup($"##confirmdelfc{g.Key}");
+        ImGui.PopStyleColor();
+        ImGui.SameLine();
+        ImGui.TextDisabled("Clears tracked FC/sub/house data for this FC. Re-populates if you log in again.");
+
+        if (ImGui.BeginPopup($"##confirmdelfc{g.Key}"))
+        {
+            ImGui.TextUnformatted($"Remove tracked data for \"{g.Name}\"?");
+            ImGui.TextDisabled("This clears the FC data on all your characters tracked in it.");
+            ImGuiHelpers.ScaledDummy(2f);
+            if (ImGui.Button("Yes, remove"))
+            {
+                foreach (var m in g.TrackedMembers)
+                    pendingClearFcCids.Add(m.ContentId);
+                expandedFcKey = "";
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel")) ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
+        }
+
         ImGui.Unindent(14 * ImGuiHelpers.GlobalScale);
     }
 
@@ -700,6 +746,12 @@ public class MainWindow : Window
         {
             plugin.ClearFcData(pendingClearFcCid);
             pendingClearFcCid = 0;
+        }
+        if (pendingClearFcCids.Count > 0)
+        {
+            foreach (var cid in pendingClearFcCids)
+                plugin.ClearFcData(cid);
+            pendingClearFcCids.Clear();
         }
         if (pendingClearAll)
         {

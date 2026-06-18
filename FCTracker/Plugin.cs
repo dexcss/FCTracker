@@ -226,6 +226,32 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    // Logs over to another character by delegating to AutoRetainer's relog command.
+    // AR owns the chara-select automation; we just trigger it. Returns a status
+    // string ("" = sent OK) for the UI to surface.
+    public string RelogTo(string characterName, string worldName)
+    {
+        if (string.IsNullOrEmpty(characterName) || string.IsNullOrEmpty(worldName))
+            return "Missing character or world name.";
+
+        if (!PluginIpc.IsAutoRetainerAvailable())
+            return "AutoRetainer isn't installed — the login button uses its relog.";
+
+        try
+        {
+            // AR parses: /autoretainer relog Character Name@WorldName
+            var cmd = $"/autoretainer relog {characterName}@{worldName}";
+            CommandManager.ProcessCommand(cmd);
+            Log.Info($"FC Tracker: requested relog via AutoRetainer -> {characterName}@{worldName}");
+            return "";
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "FC Tracker relog command failed");
+            return $"Relog failed: {ex.Message}";
+        }
+    }
+
     // Enrich records with AutoRetainer service-account info for ALL registered
     // characters (not just the logged-in one), so account aliases resolve even for
     // alts not currently online. Throttled by the caller. Best-effort.

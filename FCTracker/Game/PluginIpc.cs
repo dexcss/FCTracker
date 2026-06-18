@@ -121,6 +121,35 @@ public static class PluginIpc
 
     // Logs into a character from anywhere (connects, opens chara-select, logs in).
     // Confirmed in Lifestream's IPCProvider: ConnectAndLogin(name, homeWorld).
+    // Logs into a character via Lifestream. Returns a human-readable result so the
+    // caller can surface why it failed (Lifestream silently returns false when its
+    // own CanAutoLogin() is not satisfied or it's busy).
+    public static string LifestreamLoginDiagnostic(string charaName, string homeWorld)
+    {
+        try
+        {
+            // Probe Lifestream presence.
+            try { Pi.GetIpcSubscriber<bool>("Lifestream.IsBusy").InvokeFunc(); }
+            catch { return "Lifestream not installed / IPC unavailable."; }
+
+            bool busy = false;
+            try { busy = Pi.GetIpcSubscriber<bool>("Lifestream.IsBusy").InvokeFunc(); } catch { }
+            if (busy) return "Lifestream is busy right now — try again in a moment.";
+
+            bool canAuto = true;
+            try { canAuto = Pi.GetIpcSubscriber<bool>("Lifestream.CanAutoLogin").InvokeFunc(); } catch { }
+            if (!canAuto) return "Lifestream auto-login isn't available (enable/allow auto-login in Lifestream settings, and be at a state where it can act).";
+
+            var ok = Pi.GetIpcSubscriber<string, string, bool>("Lifestream.ConnectAndLogin")
+                .InvokeFunc(charaName, homeWorld);
+            return ok ? "" : "Lifestream declined the login (busy or auto-login prerequisites not met).";
+        }
+        catch (Exception ex)
+        {
+            return $"Login call failed: {ex.Message}";
+        }
+    }
+
     public static bool LifestreamLogin(string charaName, string homeWorld)
     {
         try
