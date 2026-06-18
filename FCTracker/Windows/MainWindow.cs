@@ -167,7 +167,25 @@ public class MainWindow : Window
             {
                 g.SubsKnown = true;
                 if (c.Submersibles.Count > g.SubCount) g.SubCount = c.Submersibles.Count;
+
+                // Latest return time from our own captured submarine data. A deployed
+                // sub has ReturnTime > 0; an idle/home sub is 0. Track the max so the
+                // column shows when the last one is back.
+                foreach (var v in c.Submersibles)
+                {
+                    if (v.ReturnTime > g.SubReturnUnix)
+                    {
+                        g.SubReturnUnix = v.ReturnTime;
+                        g.SubReturnKnown = true;
+                    }
+                    // Even an idle sub means we *know* the return state (they're home).
+                    g.SubReturnKnown = true;
+                }
             }
+
+            // Does this character have submarines (captured workshop data OR an AR
+            // return time)? Either is good evidence they're the sub-runner.
+            var hasSubs = (c.VesselsLastUpdatedUtc != null && c.Submersibles.Count > 0) || c.SubReturnUnix > 0;
 
             if (c.IsWorkshopRunner)
             {
@@ -175,12 +193,15 @@ public class MainWindow : Window
                 g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
                 g.SubRunnerIsExplicit = true;
                 if (!string.IsNullOrEmpty(c.AccountKey)) g.SubRunnerAccountKey = c.AccountKey;
-                if (c.SubReturnUnix > 0) { g.SubReturnUnix = c.SubReturnUnix; g.SubReturnKnown = true; }
+                if (c.SubReturnUnix > g.SubReturnUnix) { g.SubReturnUnix = c.SubReturnUnix; }
+                if (c.SubReturnUnix > 0) g.SubReturnKnown = true;
             }
-            else if (!g.SubRunnerIsExplicit && c.SubReturnUnix > 0)
+            else if (!g.SubRunnerIsExplicit && hasSubs)
             {
-                // Fallback: no AR-flagged runner yet — use whoever has subs out. If
-                // several, keep the one with the latest return (most recently sent).
+                // Fallback: no AR-flagged runner — use whoever has subs. If several,
+                // prefer the one with the latest known return (most recently sent);
+                // characters with only captured data (no return time) fill in if none
+                // have a return time yet.
                 if (string.IsNullOrEmpty(g.SubRunnerName) || c.SubReturnUnix > g.SubReturnUnix)
                 {
                     g.SubRunnerName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
@@ -542,9 +563,14 @@ public class MainWindow : Window
                     break;
 
                 case Col.Returns:
-                    if (!g.SubReturnKnown || g.SubReturnUnix == 0)
+                    if (!g.SubReturnKnown)
                     {
                         ImGui.TextColored(grey, "-");
+                    }
+                    else if (g.SubReturnUnix == 0)
+                    {
+                        // Subs known but none deployed -> they're home.
+                        ImGui.TextColored(green, "Back");
                     }
                     else
                     {
