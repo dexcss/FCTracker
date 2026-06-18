@@ -373,7 +373,7 @@ public class MainWindow : Window
             case Col.World: ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.Account: ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.SubRunner: ImGui.TableSetupColumn("Sub-runner", ImGuiTableColumnFlags.WidthStretch, 1.8f); break;
-            case Col.CustomName: ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch, 1.4f); break;
+            case Col.CustomName: ImGui.TableSetupColumn("Nickname", ImGuiTableColumnFlags.WidthStretch, 1.4f); break;
             case Col.Fc: ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.0f); break;
             case Col.Tag: ImGui.TableSetupColumn("Tag", ImGuiTableColumnFlags.WidthStretch, 0.7f); break;
             case Col.Members: ImGui.TableSetupColumn("Members", ImGuiTableColumnFlags.WidthStretch, 0.7f); break;
@@ -395,7 +395,7 @@ public class MainWindow : Window
             case Col.World: DrawSortHeader(FcSortCol.World, "World"); break;
             case Col.Account: DrawSortHeader(FcSortCol.Account, "Account"); break;
             case Col.SubRunner: DrawSortHeader(FcSortCol.SubRunner, "Sub-runner"); break;
-            case Col.CustomName: DrawSortHeader(FcSortCol.CustomName, "Name"); break;
+            case Col.CustomName: DrawSortHeader(FcSortCol.CustomName, "Nickname"); break;
             case Col.Fc: DrawSortHeader(FcSortCol.Name, "Free Company"); break;
             case Col.Tag: DrawSortHeader(FcSortCol.Tag, "Tag"); break;
             case Col.Members: DrawSortHeader(FcSortCol.Members, "Members"); break;
@@ -576,7 +576,7 @@ public class MainWindow : Window
         plugin.Config.CustomFcNames.TryGetValue(g.Key, out var custom);
         custom ??= string.Empty;
         ImGui.SetNextItemWidth(280 * ImGuiHelpers.GlobalScale);
-        if (ImGui.InputText($"Custom name###custom{g.Key}", ref custom, 64))
+        if (ImGui.InputText($"Nickname###custom{g.Key}", ref custom, 64))
         {
             if (string.IsNullOrEmpty(custom)) plugin.Config.CustomFcNames.Remove(g.Key);
             else plugin.Config.CustomFcNames[g.Key] = custom;

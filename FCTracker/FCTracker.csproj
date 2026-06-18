@@ -3,7 +3,7 @@
     <PropertyGroup>
         <Authors>Akari</Authors>
         <AssemblyName>FCTracker</AssemblyName>
-        <Version>1.5.0.1</Version>
+        <Version>1.5.1.0</Version>
         <Description>Tracks your characters' Free Companies: name, tag, level, master, credits, house ownership, and workshop airships/submersibles.</Description>
     </PropertyGroup>
 
