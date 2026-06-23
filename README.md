@@ -17,7 +17,7 @@ Open the window with `/fctracker` (alias `/fct`).
 ## Installing (custom repo)
 
 1. In game: `/xlsettings` -> Experimental -> Custom Plugin Repositories.
-2. Add: `https://raw.githubusercontent.com/dexcss/FCTracker/main/repo.json`
+2. Add: `https://raw.githubusercontent.com/dexcss/DalamudPlugins/main/repo.json`
 3. Save, then find "FC Tracker" in the plugin installer.
 
 ## Notes
