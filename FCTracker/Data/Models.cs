@@ -106,6 +106,7 @@ public class FreeCompanySnapshot
     public ushort HomeWorldId;
     public byte GrandCompany;
     public string Region = string.Empty;   // short code: JP/NA/EU/OCE/CN/KR/CLD/TCN
+    public string DataCenter = string.Empty; // e.g. Aether, Crystal, Gaia
 
     // Best-effort, scraped from the FC window addon when available (may be empty).
     public string PointsText = string.Empty;    // e.g. "Company Points: 1234"

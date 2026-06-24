@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
+using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using FCTracker.Data;
@@ -38,7 +40,7 @@ public class MainWindow : Window
     private DateTime loginResultUntil = DateTime.MinValue;
 
     // ---- FC sort ----
-    private enum FcSortCol { Region, World, Account, SubRunner, Character, CustomName, Name, Tag, Members, Level, Subs, Returns, House, Credits }
+    private enum FcSortCol { Region, DataCenter, World, Account, SubRunner, Character, CustomName, Name, Tag, Members, Level, Subs, Returns, House, Credits }
     private FcSortCol fcSort = FcSortCol.Name;
     private bool fcSortAsc = true;
 
@@ -51,6 +53,7 @@ public class MainWindow : Window
         public string Name = "";
         public string Tag = "";
         public string Region = "";
+        public string DataCenter = "";
         public string World = "";
         public ushort Members;           // total FC members (from the snapshot)
         public byte Level;
@@ -151,6 +154,7 @@ public class MainWindow : Window
                     Name = fc?.Name ?? "(no FC)",
                     Tag = fc?.Tag ?? "",
                     Region = fc?.Region ?? "",
+                    DataCenter = fc?.DataCenter ?? "",
                     World = c.WorldName,
                     Members = fc?.TotalMembers ?? 0,
                     Level = fc?.Rank ?? 0,
@@ -244,6 +248,7 @@ public class MainWindow : Window
         Comparison<FcGroup> cmp = fcSort switch
         {
             FcSortCol.Region => (a, b) => string.Compare(a.Region, b.Region, StringComparison.OrdinalIgnoreCase),
+            FcSortCol.DataCenter => (a, b) => string.Compare(a.DataCenter, b.DataCenter, StringComparison.OrdinalIgnoreCase),
             FcSortCol.World => (a, b) => string.Compare(a.World, b.World, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Account => (a, b) => string.Compare(AccountAliasLabel(a.EffectiveAccountKey), AccountAliasLabel(b.EffectiveAccountKey), StringComparison.OrdinalIgnoreCase),
             FcSortCol.SubRunner => (a, b) => string.Compare(a.SubRunnerName, b.SubRunnerName, StringComparison.OrdinalIgnoreCase),
@@ -288,12 +293,13 @@ public class MainWindow : Window
         => g.SubReturnKnown ? g.SubReturnUnix : long.MaxValue;
 
     // Column identity for visibility + ordering.
-    private enum Col { Tp, Login, Region, World, Account, SubRunner, Character, CustomName, Fc, Tag, Members, Level, Subs, Returns, House, Credits }
+    private enum Col { Tp, Login, Region, DataCenter, World, Account, SubRunner, Character, CustomName, Fc, Tag, Members, Level, Subs, Returns, House, Credits }
 
     // Stable string name per column (used for the saved order list).
     private static readonly (Col col, string name)[] AllColumns =
     {
-        (Col.Tp, "TP"), (Col.Login, "LOG"), (Col.Region, "Region"), (Col.World, "World"),
+        (Col.Tp, "TP"), (Col.Login, "LOG"), (Col.Region, "Region"), (Col.DataCenter, "Data Center"),
+        (Col.World, "World"),
         (Col.Account, "Account"), (Col.SubRunner, "Sub-runner"), (Col.Character, "Character"),
         (Col.CustomName, "Custom name"),
         (Col.Fc, "Free Company"), (Col.Tag, "Tag"), (Col.Members, "Members"), (Col.Level, "Level"),
@@ -305,6 +311,7 @@ public class MainWindow : Window
         Col.Tp => cfg.ColTp,
         Col.Login => cfg.ColLogin,
         Col.Region => cfg.ColRegion,
+        Col.DataCenter => cfg.ColDataCenter,
         Col.World => cfg.ColWorld,
         Col.Account => cfg.ColAccount,
         Col.SubRunner => cfg.ColSubRunner,
@@ -419,6 +426,7 @@ public class MainWindow : Window
             case Col.Tp: ImGui.TableSetupColumn("TP", ImGuiTableColumnFlags.WidthFixed, 30 * s); break;
             case Col.Login: ImGui.TableSetupColumn("LOG", ImGuiTableColumnFlags.WidthFixed, 34 * s); break;
             case Col.Region: ImGui.TableSetupColumn("Region", ImGuiTableColumnFlags.WidthStretch, 0.7f); break;
+            case Col.DataCenter: ImGui.TableSetupColumn("Data Center", ImGuiTableColumnFlags.WidthStretch, 1.0f); break;
             case Col.World: ImGui.TableSetupColumn("World", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.Account: ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.SubRunner: ImGui.TableSetupColumn("Sub-runner", ImGuiTableColumnFlags.WidthStretch, 1.8f); break;
@@ -442,6 +450,7 @@ public class MainWindow : Window
             case Col.Tp: ImGui.TableNextColumn(); ImGui.TextDisabled("TP"); break;
             case Col.Login: ImGui.TableNextColumn(); ImGui.TextDisabled("LOG"); break;
             case Col.Region: DrawSortHeader(FcSortCol.Region, "Region"); break;
+            case Col.DataCenter: DrawSortHeader(FcSortCol.DataCenter, "Data Center"); break;
             case Col.World: DrawSortHeader(FcSortCol.World, "World"); break;
             case Col.Account: DrawSortHeader(FcSortCol.Account, "Account"); break;
             case Col.SubRunner: DrawSortHeader(FcSortCol.SubRunner, "Sub-runner"); break;
@@ -461,14 +470,14 @@ public class MainWindow : Window
     private void DrawSortHeader(FcSortCol col, string label)
     {
         ImGui.TableNextColumn();
-        var arrow = fcSort == col ? (fcSortAsc ? " \u25B2" : " \u25BC") : "";
+        var arrow = fcSort == col ? (fcSortAsc ? " ^" : " v") : "";
         if (ImGui.Selectable($"{label}{arrow}###fchdr{(int)col}"))
         {
             if (fcSort == col) fcSortAsc = !fcSortAsc;
             else
             {
                 fcSort = col;
-                fcSortAsc = col is FcSortCol.Region or FcSortCol.World or FcSortCol.Account
+                fcSortAsc = col is FcSortCol.Region or FcSortCol.DataCenter or FcSortCol.World or FcSortCol.Account
                     or FcSortCol.SubRunner or FcSortCol.Character or FcSortCol.CustomName or FcSortCol.Name or FcSortCol.Tag;
             }
         }
@@ -481,7 +490,6 @@ public class MainWindow : Window
         var green = new Vector4(0.5f, 0.85f, 0.5f, 1f);
         var hasHouse = g.House?.HasHouse == true;
         var isOpen = expandedFcKey == g.Key;
-        var tri = isOpen ? "\u25BC " : "\u25B6 ";
 
         ImGui.TableNextRow();
 
@@ -493,8 +501,10 @@ public class MainWindow : Window
                 case Col.Tp:
                     if (hasHouse && g.House != null && !g.House.IsApartment)
                     {
-                        if (ImGui.SmallButton($"\u27A4###go{g.Key}"))
+                        ImGui.PushID($"go{g.Key}");
+                        if (ImGuiComponents.IconButton(FontAwesomeIcon.LocationArrow))
                             PluginIpc.LifestreamGoToAddress(g.World, g.House.District, g.House.Ward, g.House.Plot);
+                        ImGui.PopID();
                         if (ImGui.IsItemHovered())
                             ImGui.SetTooltip($"Lifestream to {g.World} {g.House.District} W{g.House.Ward} P{g.House.Plot}");
                     }
@@ -507,7 +517,8 @@ public class MainWindow : Window
                                  ?? (g.TrackedMembers.Count > 0 ? g.TrackedMembers[0] : null);
                     if (target != null && !string.IsNullOrEmpty(target.CharacterName) && !string.IsNullOrEmpty(target.WorldName))
                     {
-                        if (ImGui.SmallButton($"{LoginGlyph}###login{g.Key}"))
+                        ImGui.PushID($"login{g.Key}");
+                        if (ImGuiComponents.IconButton(FontAwesomeIcon.DoorOpen))
                         {
                             var r = plugin.RelogTo(target.CharacterName, target.WorldName);
                             loginResult = string.IsNullOrEmpty(r)
@@ -515,6 +526,7 @@ public class MainWindow : Window
                                 : r;
                             loginResultUntil = DateTime.UtcNow.AddSeconds(8);
                         }
+                        ImGui.PopID();
                         if (ImGui.IsItemHovered())
                             ImGui.SetTooltip($"Log into {target.CharacterName} @ {target.WorldName} (via AutoRetainer relog)");
                     }
@@ -523,31 +535,34 @@ public class MainWindow : Window
                 }
 
                 case Col.Region:
-                    ExpandableCell(g, c == triCol, isOpen, tri, string.IsNullOrEmpty(g.Region) ? "-" : g.Region);
+                    ExpandableCell(g, c == triCol, isOpen, string.IsNullOrEmpty(g.Region) ? "-" : g.Region);
+                    break;
+                case Col.DataCenter:
+                    ExpandableCell(g, c == triCol, isOpen, string.IsNullOrEmpty(g.DataCenter) ? "-" : g.DataCenter);
                     break;
                 case Col.World:
-                    ExpandableCell(g, c == triCol, isOpen, tri, string.IsNullOrEmpty(g.World) ? "-" : g.World);
+                    ExpandableCell(g, c == triCol, isOpen, string.IsNullOrEmpty(g.World) ? "-" : g.World);
                     break;
                 case Col.Account:
-                    ExpandableCell(g, c == triCol, isOpen, tri, AccountAliasLabel(g.EffectiveAccountKey));
+                    ExpandableCell(g, c == triCol, isOpen, AccountAliasLabel(g.EffectiveAccountKey));
                     break;
                 case Col.SubRunner:
-                    ExpandableCell(g, c == triCol, isOpen, tri, string.IsNullOrEmpty(g.SubRunnerName) ? "-" : g.SubRunnerName);
+                    ExpandableCell(g, c == triCol, isOpen, string.IsNullOrEmpty(g.SubRunnerName) ? "-" : g.SubRunnerName);
                     break;
                 case Col.Character:
-                    ExpandableCell(g, c == triCol, isOpen, tri, string.IsNullOrEmpty(g.FirstCharacterName) ? "-" : g.FirstCharacterName);
+                    ExpandableCell(g, c == triCol, isOpen, string.IsNullOrEmpty(g.FirstCharacterName) ? "-" : g.FirstCharacterName);
                     break;
                 case Col.CustomName:
-                    ExpandableCell(g, c == triCol, isOpen, tri, CustomName(g));
+                    ExpandableCell(g, c == triCol, isOpen, CustomName(g));
                     break;
                 case Col.Fc:
-                    ExpandableCell(g, c == triCol, isOpen, tri, g.Name);
+                    ExpandableCell(g, c == triCol, isOpen, g.Name);
                     break;
                 case Col.Tag:
-                    ExpandableCell(g, c == triCol, isOpen, tri, string.IsNullOrEmpty(g.Tag) ? "-" : g.Tag);
+                    ExpandableCell(g, c == triCol, isOpen, string.IsNullOrEmpty(g.Tag) ? "-" : g.Tag);
                     break;
                 case Col.Members:
-                    ExpandableCell(g, c == triCol, isOpen, tri, g.Members > 0 ? g.Members.ToString() : "-");
+                    ExpandableCell(g, c == triCol, isOpen, g.Members > 0 ? g.Members.ToString() : "-");
                     break;
 
                 case Col.Level:
@@ -593,11 +608,18 @@ public class MainWindow : Window
 
     // Renders a text cell that, if it's the designated trigger column, doubles as the
     // row-expand toggle (full-width selectable with the ▶/▼ triangle).
-    private void ExpandableCell(FcGroup g, bool isTrigger, bool isOpen, string tri, string text)
+    private void ExpandableCell(FcGroup g, bool isTrigger, bool isOpen, string text)
     {
         if (isTrigger)
         {
-            if (ImGui.Selectable($"{tri}{text}###fcrow{g.Key}", isOpen, ImGuiSelectableFlags.SpanAllColumns))
+            // Draw a FontAwesome caret (always renders) then the selectable label.
+            ImGui.PushFont(UiBuilder.IconFont);
+            var caret = isOpen ? FontAwesomeIcon.CaretDown.ToIconString() : FontAwesomeIcon.CaretRight.ToIconString();
+            ImGui.TextUnformatted(caret);
+            ImGui.PopFont();
+            ImGui.SameLine(0, 4 * ImGuiHelpers.GlobalScale);
+
+            if (ImGui.Selectable($"{text}###fcrow{g.Key}", isOpen, ImGuiSelectableFlags.SpanAllColumns))
                 expandedFcKey = isOpen ? "" : g.Key;
         }
         else
@@ -610,11 +632,6 @@ public class MainWindow : Window
     {
         return plugin.Config.CustomFcNames.TryGetValue(g.Key, out var n) && !string.IsNullOrEmpty(n) ? n : "-";
     }
-
-    // Login glyph: door from the game icon font, with a safe fallback if it boxes.
-    // \uE05D is the SeIconChar door/log-out glyph; if the icon font isn't active it
-    // renders as a box, so users can fall back to the prior arrow via this constant.
-    private const string LoginGlyph = "\uE05D";
 
     private string AccountAliasLabel(string accountKey)
     {

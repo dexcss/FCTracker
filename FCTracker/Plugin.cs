@@ -158,7 +158,7 @@ public sealed class Plugin : IDalamudPlugin
             var path = string.IsNullOrWhiteSpace(Config.AutoRetainerConfigPath)
                 ? Importer.DefaultAutoRetainerConfig()
                 : Config.AutoRetainerConfigPath;
-            var r = Importer.ImportAutoRetainer(records, path);
+            var r = Importer.ImportAutoRetainer(records, path, DataManager);
             foreach (var m in r.Messages) summary.AppendLine(m);
         }
 
@@ -167,7 +167,7 @@ public sealed class Plugin : IDalamudPlugin
             var path = string.IsNullOrWhiteSpace(Config.SubmarineTrackerDbPath)
                 ? Importer.DefaultSubmarineTrackerDb()
                 : Config.SubmarineTrackerDbPath;
-            var r = Importer.ImportSubmarineTracker(records, path);
+            var r = Importer.ImportSubmarineTracker(records, path, DataManager);
             foreach (var m in r.Messages) summary.AppendLine(m);
         }
 
@@ -220,10 +220,8 @@ public sealed class Plugin : IDalamudPlugin
             Store.ClearAll();
             Config.Characters = Store.LoadAll();
         }
-        else
-        {
-            Config.Save();
-        }
+        Config.Save();
+        Log.Info("FC Tracker: cleared all tracked data.");
     }
 
     // Logs over to another character by delegating to AutoRetainer's relog command.
@@ -409,6 +407,7 @@ public sealed class Plugin : IDalamudPlugin
 
             fc.Tag = GameReader.ReadLocalPlayerFcTag(local);
             fc.Region = GameReader.ResolveRegionCode(DataManager, world);
+            fc.DataCenter = GameReader.ResolveDataCenter(DataManager, world);
 
             // Credits: hybrid read (AR credit-shop agent if open, else FC window).
             // When neither is available, carry forward the last known value.

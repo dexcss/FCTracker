@@ -251,6 +251,7 @@ public class SettingsWindow : Window
         "TP" => c.ColTp,
         "LOG" => c.ColLogin,
         "Region" => c.ColRegion,
+        "Data Center" => c.ColDataCenter,
         "World" => c.ColWorld,
         "Account" => c.ColAccount,
         "Sub-runner" => c.ColSubRunner,
@@ -274,6 +275,7 @@ public class SettingsWindow : Window
             case "TP": c.ColTp = v; break;
             case "LOG": c.ColLogin = v; break;
             case "Region": c.ColRegion = v; break;
+            case "Data Center": c.ColDataCenter = v; break;
             case "World": c.ColWorld = v; break;
             case "Account": c.ColAccount = v; break;
             case "Sub-runner": c.ColSubRunner = v; break;
@@ -301,49 +303,53 @@ public class SettingsWindow : Window
         c.ColumnOrder = new System.Collections.Generic.List<string>(order);
     }
 
+    private bool resetConfirmStage2;
+
     private void DrawResetEverything()
     {
-        const string popup1 = "##reset_confirm1";
-        const string popup2 = "##reset_confirm2";
+        const string popup = "##reset_confirm";
 
         ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.45f, 0.15f, 0.15f, 1f));
         if (ImGui.Button("Reset Everything"))
-            ImGui.OpenPopup(popup1);
+        {
+            resetConfirmStage2 = false;
+            ImGui.OpenPopup(popup);
+        }
         ImGui.PopStyleColor();
         ImGui.SameLine();
         ImGui.TextDisabled("Wipes every tracked character, FC, and note.");
 
-        // First confirmation.
-        if (ImGui.BeginPopup(popup1))
+        if (ImGui.BeginPopup(popup))
         {
-            ImGui.TextColored(Red, "ARE YOU SURE? This deletes ALL tracked data.");
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.1f, 0.1f, 1f));
-            if (ImGui.Button("Yes, continue###reset_yes1"))
+            if (!resetConfirmStage2)
             {
-                ImGui.CloseCurrentPopup();
-                ImGui.OpenPopup(popup2);
+                ImGui.TextColored(Red, "ARE YOU SURE? This deletes ALL tracked data.");
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.1f, 0.1f, 1f));
+                if (ImGui.Button("Yes, continue###reset_yes1"))
+                    resetConfirmStage2 = true;
+                ImGui.PopStyleColor();
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel###reset_cancel1"))
+                    ImGui.CloseCurrentPopup();
             }
-            ImGui.PopStyleColor();
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel###reset_cancel1"))
-                ImGui.CloseCurrentPopup();
-            ImGui.EndPopup();
-        }
-
-        // Second confirmation (separate popup so it's a distinct, deliberate click).
-        if (ImGui.BeginPopup(popup2))
-        {
-            ImGui.TextColored(Red, "FINAL CONFIRMATION. This cannot be undone.");
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.7f, 0.05f, 0.05f, 1f));
-            if (ImGui.Button("Delete everything###reset_yes2"))
+            else
             {
-                plugin.ClearAll();
-                ImGui.CloseCurrentPopup();
+                ImGui.TextColored(Red, "FINAL CONFIRMATION. This cannot be undone.");
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.7f, 0.05f, 0.05f, 1f));
+                if (ImGui.Button("Delete everything###reset_yes2"))
+                {
+                    plugin.ClearAll();
+                    resetConfirmStage2 = false;
+                    ImGui.CloseCurrentPopup();
+                }
+                ImGui.PopStyleColor();
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel###reset_cancel2"))
+                {
+                    resetConfirmStage2 = false;
+                    ImGui.CloseCurrentPopup();
+                }
             }
-            ImGui.PopStyleColor();
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel###reset_cancel2"))
-                ImGui.CloseCurrentPopup();
             ImGui.EndPopup();
         }
     }

@@ -153,6 +153,27 @@ public static unsafe class GameReader
         return "";
     }
 
+    // Resolves a world name to its data-center name (e.g. "Aether", "Gaia").
+    public static string ResolveDataCenter(IDataManager data, string worldName)
+    {
+        if (string.IsNullOrEmpty(worldName)) return "";
+        try
+        {
+            var worlds = data.GetExcelSheet<Lumina.Excel.Sheets.World>();
+            if (worlds == null) return "";
+            foreach (var w in worlds)
+            {
+                if (!w.Name.ExtractText().Equals(worldName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var dc = w.DataCenter.ValueNullable;
+                if (dc == null) return "";
+                return dc.Value.Name.ExtractText();
+            }
+        }
+        catch { /* ignore */ }
+        return "";
+    }
+
     private static string RegionAlias(string regionName, byte regionId)
     {
         // Name-based aliases (as specified).

@@ -37,8 +37,24 @@ public static class Importer
     public static string DefaultSubmarineTrackerDb()
         => Path.Combine(PluginConfigsRoot(), "SubmarineTracker", "submarine-sqlite.db");
 
+    // Given an import file path like …\<roamingRoot>\pluginConfigs\<Plugin>\file,
+    // walk up to the roaming root so it matches our own AccountKey scheme. Returns
+    // "" if the path doesn't look like a plugin-config path.
+    private static string AccountKeyFromConfigPath(string filePath, string pluginFolder)
+    {
+        try
+        {
+            // filePath -> …\pluginConfigs\<pluginFolder>\<file>
+            var pluginDir = Path.GetDirectoryName(filePath);                 // …\<pluginFolder>
+            var pluginConfigs = Directory.GetParent(pluginDir!)?.FullName;   // …\pluginConfigs
+            var roamingRoot = Directory.GetParent(pluginConfigs!)?.FullName; // roaming root
+            return roamingRoot ?? string.Empty;
+        }
+        catch { return string.Empty; }
+    }
+
     // ---- AutoRetainer (JSON) ---------------------------------------------
-    public static ImportResult ImportAutoRetainer(List<CharacterRecord> target, string path)
+    public static ImportResult ImportAutoRetainer(List<CharacterRecord> target, string path, Dalamud.Plugin.Services.IDataManager? data = null)
     {
         var res = new ImportResult();
         try
@@ -49,6 +65,11 @@ public static class Importer
                 res.AnyError = true;
                 return res;
             }
+
+            // Derive the account key from the config's roaming root (…\XIVLauncher\
+            // pluginConfigs\AutoRetainer\DefaultConfig.json -> roaming root), so
+            // imported characters are tagged with the account they came from.
+            var importAccountKey = AccountKeyFromConfigPath(path, "AutoRetainer");
 
             var root = JObject.Parse(File.ReadAllText(path));
 
@@ -75,6 +96,11 @@ public static class Importer
 
                 var (rec, isNew) = GetOrCreateForImport(target, cid, name, world, "AutoRetainer");
 
+                // Tag with the originating account (so filler accounts you can't log
+                // into still show an account), unless a live capture already set one.
+                if (string.IsNullOrEmpty(rec.AccountKey) && !string.IsNullOrEmpty(importAccountKey))
+                    rec.AccountKey = importAccountKey;
+
                 if (fcId != 0)
                 {
                     var fcName = string.Empty;
@@ -95,6 +121,11 @@ public static class Importer
                         if (!string.IsNullOrEmpty(fcName)) rec.Fc.Name = fcName;
                         if (!string.IsNullOrEmpty(fcCreditsText)) rec.Fc.CreditsText = fcCreditsText;
                         rec.Fc.Source = "AutoRetainer";
+                        // Resolve region from the world via Lumina if we can.
+                        if (data != null && string.IsNullOrEmpty(rec.Fc.Region) && !string.IsNullOrEmpty(world))
+                            rec.Fc.Region = Game.GameReader.ResolveRegionCode(data, world);
+                        if (data != null && string.IsNullOrEmpty(rec.Fc.DataCenter) && !string.IsNullOrEmpty(world))
+                            rec.Fc.DataCenter = Game.GameReader.ResolveDataCenter(data, world);
                         if (rec.FirstSeenFcId == 0) rec.FirstSeenFcId = fcId;
                     }
 
@@ -147,11 +178,12 @@ public static class Importer
     }
 
     // ---- SubmarineTracker (SQLite) ---------------------------------------
-    public static ImportResult ImportSubmarineTracker(List<CharacterRecord> target, string dbPath)
+    public static ImportResult ImportSubmarineTracker(List<CharacterRecord> target, string dbPath, Dalamud.Plugin.Services.IDataManager? data = null)
     {
         var res = new ImportResult();
         try
         {
+            var importAccountKey = AccountKeyFromConfigPath(dbPath, "SubmarineTracker");
             if (!File.Exists(dbPath))
             {
                 res.Messages.Add($"SubmarineTracker database not found at {dbPath}");
@@ -237,12 +269,19 @@ public static class Importer
                             target, SyntheticCid(fcId), info.chara, info.world, "SubmarineTracker");
                     }
 
+                    if (string.IsNullOrEmpty(rec.AccountKey) && !string.IsNullOrEmpty(importAccountKey))
+                        rec.AccountKey = importAccountKey;
+
                     if (rec.Source != "Live" && (rec.Fc == null || rec.Fc.Source != "Live"))
                     {
                         rec.Fc ??= new FreeCompanySnapshot();
                         rec.Fc.FreeCompanyId = fcId;
                         if (string.IsNullOrEmpty(rec.Fc.Tag)) rec.Fc.Tag = info.tag;
                         rec.Fc.Source = "SubmarineTracker";
+                        if (data != null && string.IsNullOrEmpty(rec.Fc.Region) && !string.IsNullOrEmpty(info.world))
+                            rec.Fc.Region = Game.GameReader.ResolveRegionCode(data, info.world);
+                        if (data != null && string.IsNullOrEmpty(rec.Fc.DataCenter) && !string.IsNullOrEmpty(info.world))
+                            rec.Fc.DataCenter = Game.GameReader.ResolveDataCenter(data, info.world);
                         if (rec.FirstSeenFcId == 0) rec.FirstSeenFcId = fcId;
                     }
 

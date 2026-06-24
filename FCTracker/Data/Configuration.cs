@@ -46,6 +46,7 @@ public class Configuration : IPluginConfiguration
     public bool ColTp = true;          // Lifestream-to-house button
     public bool ColLogin = true;       // login (door) button column (also needs ShowLoginButton)
     public bool ColRegion = false;     // mirrors ShowRegionColumn intent; kept separate per-toggle
+    public bool ColDataCenter = false; // data center name (Aether, etc.)
     public bool ColWorld = true;
     public bool ColAccount = true;
     public bool ColSubRunner = true;
