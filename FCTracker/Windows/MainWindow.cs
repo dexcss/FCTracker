@@ -233,7 +233,7 @@ public class MainWindow : Window
                 list.Add(g);
                 continue;
             }
-            var hay = $"{g.Region} {g.World} {g.Name} {g.Tag} {g.SubRunnerName} {AccountAliasLabel(g.EffectiveAccountKey)}";
+            var hay = $"{g.Region} {g.DataCenter} {g.World} {g.Name} {g.Tag} {g.SubRunnerName} {g.FirstCharacterName} {CustomName(g)} {AccountAliasLabel(g.EffectiveAccountKey)}";
             foreach (var m in g.TrackedMembers) hay += $" {m.CharacterName}";
             if (hay.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
                 list.Add(g);
@@ -470,8 +470,9 @@ public class MainWindow : Window
     private void DrawSortHeader(FcSortCol col, string label)
     {
         ImGui.TableNextColumn();
-        var arrow = fcSort == col ? (fcSortAsc ? " ^" : " v") : "";
-        if (ImGui.Selectable($"{label}{arrow}###fchdr{(int)col}"))
+        var active = fcSort == col;
+        // Reserve the click on the label; draw a caret icon after it when active.
+        if (ImGui.Selectable($"{label}###fchdr{(int)col}"))
         {
             if (fcSort == col) fcSortAsc = !fcSortAsc;
             else
@@ -480,6 +481,13 @@ public class MainWindow : Window
                 fcSortAsc = col is FcSortCol.Region or FcSortCol.DataCenter or FcSortCol.World or FcSortCol.Account
                     or FcSortCol.SubRunner or FcSortCol.Character or FcSortCol.CustomName or FcSortCol.Name or FcSortCol.Tag;
             }
+        }
+        if (active)
+        {
+            ImGui.SameLine(0, 3 * ImGuiHelpers.GlobalScale);
+            ImGui.PushFont(UiBuilder.IconFont);
+            ImGui.TextUnformatted(fcSortAsc ? FontAwesomeIcon.CaretUp.ToIconString() : FontAwesomeIcon.CaretDown.ToIconString());
+            ImGui.PopFont();
         }
     }
 
