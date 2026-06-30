@@ -34,6 +34,7 @@ public class MainWindow : Window
 
     private string search = string.Empty;
     private string expandedFcKey = "";
+    private bool scrollToDetail;
 
     // Transient feedback from the login button (shown briefly in the top bar).
     private string loginResult = "";
@@ -411,6 +412,13 @@ public class MainWindow : Window
             {
                 ImGuiHelpers.ScaledDummy(4f);
                 ImGui.Separator();
+                // When the row was just opened, scroll the window so the detail panel
+                // comes into view instead of being buried below the fold.
+                if (scrollToDetail)
+                {
+                    ImGui.SetScrollHereY(1.0f);
+                    scrollToDetail = false;
+                }
                 if (ImGui.BeginChild("##fcdetail", new Vector2(0, 0), false))
                     DrawFcDetail(open, cfg);
                 ImGui.EndChild();
@@ -628,7 +636,10 @@ public class MainWindow : Window
             ImGui.SameLine(0, 4 * ImGuiHelpers.GlobalScale);
 
             if (ImGui.Selectable($"{text}###fcrow{g.Key}", isOpen, ImGuiSelectableFlags.SpanAllColumns))
-                expandedFcKey = isOpen ? "" : g.Key;
+            {
+                if (isOpen) { expandedFcKey = ""; }
+                else { expandedFcKey = g.Key; scrollToDetail = true; }
+            }
         }
         else
         {
