@@ -412,13 +412,6 @@ public class MainWindow : Window
             {
                 ImGuiHelpers.ScaledDummy(4f);
                 ImGui.Separator();
-                // When the row was just opened, scroll the window so the detail panel
-                // comes into view instead of being buried below the fold.
-                if (scrollToDetail)
-                {
-                    ImGui.SetScrollHereY(1.0f);
-                    scrollToDetail = false;
-                }
                 if (ImGui.BeginChild("##fcdetail", new Vector2(0, 0), false))
                     DrawFcDetail(open, cfg);
                 ImGui.EndChild();
@@ -639,6 +632,15 @@ public class MainWindow : Window
             {
                 if (isOpen) { expandedFcKey = ""; }
                 else { expandedFcKey = g.Key; scrollToDetail = true; }
+            }
+
+            // On the frame after opening, scroll the table so the opened row sits near
+            // the top of the table's visible area — that frees the space below for the
+            // detail panel instead of leaving the opened row buried mid-list.
+            if (scrollToDetail && isOpen)
+            {
+                ImGui.SetScrollHereY(0.1f);
+                scrollToDetail = false;
             }
         }
         else
