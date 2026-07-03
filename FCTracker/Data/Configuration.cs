@@ -60,6 +60,8 @@ public class Configuration : IPluginConfiguration
     public bool ColHouse = true;
     public bool ColCredits = true;
     public bool ColCustomName = false; // custom per-FC house/label name
+    public bool ColOwner = false;      // FC owner character name (editable, defaults to first seen)
+    public bool ColBidTimer = false;   // per-character housing bid eligibility countdown
 
     // Column display order (by name). Any columns missing here are appended in
     // default order; unknown names are ignored. Lets users reorder via settings.
@@ -67,6 +69,24 @@ public class Configuration : IPluginConfiguration
 
     // Per-FC custom names (keyed by the same stable FC key the UI uses).
     public Dictionary<string, string> CustomFcNames = new();
+
+    // Per-FC owner character name (editable; defaults to the first character seen).
+    // Keyed by the stable FC key.
+    public Dictionary<string, string> FcOwnerNames = new();
+
+    // Housing bid eligibility: 30 days from a start date. Per character (ContentId),
+    // the start date defaults to first-seen but can be overridden. Stored as unix
+    // seconds; 0 = use the character's FirstSeenInFcUtc.
+    public Dictionary<ulong, long> BidStartOverrideUnix = new();
+    public int BidEligibilityDays = 30;
+
+    // Customizable colors (RGBA 0-1, stored as float[4]). Null = use default.
+    public float[]? ColorTimer;      // sub return countdown / bid countdown text
+    public float[]? ColorReady;      // "Back"/eligible (green)
+    public float[]? ColorSubsFull;   // subs deployed/full
+    public float[]? ColorSubsEmpty;  // subs 0/4 with a house (warning)
+    public float[]? ColorLevelLow;   // FC level < 6
+    public float[]? ColorDaysNew;    // days-in-FC <= 30
 
     // Account aliases: maps a detected Dalamud roaming path -> a friendly name.
     // (ServiceAccount turned out to be the wrong axis — it's the paid +chars tier,
@@ -83,6 +103,21 @@ public class Configuration : IPluginConfiguration
     public void Initialize(IDalamudPluginInterface pi) => pluginInterface = pi;
 
     public void Save() => pluginInterface?.SavePluginConfig(this);
+
+    // Default semantic colors (RGBA).
+    public static readonly float[] DefTimer = { 0.85f, 0.8f, 0.45f, 1f };
+    public static readonly float[] DefReady = { 0.5f, 0.85f, 0.5f, 1f };
+    public static readonly float[] DefSubsFull = { 0.5f, 0.85f, 0.5f, 1f };
+    public static readonly float[] DefSubsEmpty = { 0.85f, 0.5f, 0.5f, 1f };
+    public static readonly float[] DefLevelLow = { 0.85f, 0.5f, 0.5f, 1f };
+    public static readonly float[] DefDaysNew = { 0.85f, 0.5f, 0.5f, 1f };
+
+    public System.Numerics.Vector4 Col(float[]? stored, float[] def)
+    {
+        var c = stored ?? def;
+        if (c.Length < 4) c = def;
+        return new System.Numerics.Vector4(c[0], c[1], c[2], c[3]);
+    }
 
     public CharacterRecord GetOrCreate(ulong contentId, string name, string world)
     {

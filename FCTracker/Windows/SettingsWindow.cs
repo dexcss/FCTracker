@@ -130,6 +130,31 @@ public class SettingsWindow : Window
 
         ImGuiHelpers.ScaledDummy(6f);
 
+        // --- Colors ---
+        ImGui.TextUnformatted("Colors");
+        ImGui.Separator();
+        ImGui.TextDisabled("Customize the colors used for timers, subs, and warnings.");
+
+        ColorEdit("Timers (countdowns)", ref config.ColorTimer, Configuration.DefTimer, config);
+        ColorEdit("Ready / Eligible / Back", ref config.ColorReady, Configuration.DefReady, config);
+        ColorEdit("Subs deployed (#/4)", ref config.ColorSubsFull, Configuration.DefSubsFull, config);
+        ColorEdit("Subs empty with house (0/4)", ref config.ColorSubsEmpty, Configuration.DefSubsEmpty, config);
+        ColorEdit("FC level below 6", ref config.ColorLevelLow, Configuration.DefLevelLow, config);
+        ColorEdit("Days in FC (new member)", ref config.ColorDaysNew, Configuration.DefDaysNew, config);
+
+        ImGuiHelpers.ScaledDummy(4f);
+        // Bid eligibility days.
+        var bidDays = config.BidEligibilityDays;
+        ImGui.SetNextItemWidth(120 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputInt("Bid eligibility days", ref bidDays))
+        {
+            config.BidEligibilityDays = Math.Clamp(bidDays, 1, 365);
+            config.Save();
+        }
+        ImGui.TextDisabled("Days after the (editable) start date before a character can bid on housing. Default 30.");
+
+        ImGuiHelpers.ScaledDummy(6f);
+
         // --- Accounts ---
         ImGui.TextUnformatted("Accounts");
         ImGui.Separator();
@@ -256,6 +281,8 @@ public class SettingsWindow : Window
         "Account" => c.ColAccount,
         "Sub-runner" => c.ColSubRunner,
         "Character" => c.ColCharacter,
+        "FC Owner" => c.ColOwner,
+        "Bid Eligible" => c.ColBidTimer,
         "Custom name" => c.ColCustomName,
         "Free Company" => c.ColFc,
         "Tag" => c.ColTag,
@@ -280,6 +307,8 @@ public class SettingsWindow : Window
             case "Account": c.ColAccount = v; break;
             case "Sub-runner": c.ColSubRunner = v; break;
             case "Character": c.ColCharacter = v; break;
+            case "FC Owner": c.ColOwner = v; break;
+            case "Bid Eligible": c.ColBidTimer = v; break;
             case "Custom name": c.ColCustomName = v; break;
             case "Free Company": c.ColFc = v; break;
             case "Tag": c.ColTag = v; break;
@@ -304,6 +333,29 @@ public class SettingsWindow : Window
     }
 
     private bool resetConfirmStage2;
+
+    private static void ColorEdit(string label, ref float[]? stored, float[] def, Configuration config)
+    {
+        var cur = stored ?? def;
+        var v = new Vector4(cur[0], cur[1], cur[2], cur.Length > 3 ? cur[3] : 1f);
+        ImGui.PushID(label);
+        if (ImGui.ColorEdit4(label, ref v))
+        {
+            stored = new[] { v.X, v.Y, v.Z, v.W };
+            config.Save();
+        }
+        // Reset-to-default if customized.
+        if (stored != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Reset"))
+            {
+                stored = null;
+                config.Save();
+            }
+        }
+        ImGui.PopID();
+    }
 
     private void DrawResetEverything()
     {

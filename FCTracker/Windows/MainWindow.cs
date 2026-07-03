@@ -41,7 +41,7 @@ public class MainWindow : Window
     private DateTime loginResultUntil = DateTime.MinValue;
 
     // ---- FC sort ----
-    private enum FcSortCol { Region, DataCenter, World, Account, SubRunner, Character, CustomName, Name, Tag, Members, Level, Subs, Returns, House, Credits }
+    private enum FcSortCol { Region, DataCenter, World, Account, SubRunner, Character, Owner, CustomName, Name, Tag, Members, Level, Subs, Returns, BidTimer, House, Credits }
     private FcSortCol fcSort = FcSortCol.Name;
     private bool fcSortAsc = true;
 
@@ -66,6 +66,7 @@ public class MainWindow : Window
         public bool SubReturnKnown;
         public string SubRunnerName = "";
         public string FirstCharacterName = "";  // first character seen attached to this FC
+        public string FirstCharacterNameRaw = ""; // name only (no @ world), for owner default
         public bool SubRunnerIsExplicit;  // true if from AR WorkshopEnabled (vs. sub-activity fallback)
         public string SubRunnerAccountKey = "";
         public string FallbackAccountKey = "";
@@ -166,7 +167,10 @@ public class MainWindow : Window
 
             g.TrackedMembers.Add(c);
             if (string.IsNullOrEmpty(g.FirstCharacterName) && !string.IsNullOrEmpty(c.CharacterName))
+            {
                 g.FirstCharacterName = string.IsNullOrEmpty(c.WorldName) ? c.CharacterName : $"{c.CharacterName} @ {c.WorldName}";
+                g.FirstCharacterNameRaw = c.CharacterName;
+            }
 
             if (c.VesselsLastUpdatedUtc != null)
             {
@@ -234,7 +238,7 @@ public class MainWindow : Window
                 list.Add(g);
                 continue;
             }
-            var hay = $"{g.Region} {g.DataCenter} {g.World} {g.Name} {g.Tag} {g.SubRunnerName} {g.FirstCharacterName} {CustomName(g)} {AccountAliasLabel(g.EffectiveAccountKey)}";
+            var hay = $"{g.Region} {g.DataCenter} {g.World} {g.Name} {g.Tag} {g.SubRunnerName} {g.FirstCharacterName} {OwnerName(g)} {CustomName(g)} {AccountAliasLabel(g.EffectiveAccountKey)}";
             foreach (var m in g.TrackedMembers) hay += $" {m.CharacterName}";
             if (hay.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
                 list.Add(g);
@@ -254,6 +258,8 @@ public class MainWindow : Window
             FcSortCol.Account => (a, b) => string.Compare(AccountAliasLabel(a.EffectiveAccountKey), AccountAliasLabel(b.EffectiveAccountKey), StringComparison.OrdinalIgnoreCase),
             FcSortCol.SubRunner => (a, b) => string.Compare(a.SubRunnerName, b.SubRunnerName, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Character => (a, b) => string.Compare(a.FirstCharacterName, b.FirstCharacterName, StringComparison.OrdinalIgnoreCase),
+            FcSortCol.Owner => (a, b) => string.Compare(OwnerName(a), OwnerName(b), StringComparison.OrdinalIgnoreCase),
+            FcSortCol.BidTimer => (a, b) => GroupSoonestBidEligible(a).CompareTo(GroupSoonestBidEligible(b)),
             FcSortCol.CustomName => (a, b) => string.Compare(CustomName(a), CustomName(b), StringComparison.OrdinalIgnoreCase),
             FcSortCol.Name => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Tag => (a, b) => string.Compare(a.Tag, b.Tag, StringComparison.OrdinalIgnoreCase),
@@ -294,7 +300,7 @@ public class MainWindow : Window
         => g.SubReturnKnown ? g.SubReturnUnix : long.MaxValue;
 
     // Column identity for visibility + ordering.
-    private enum Col { Tp, Login, Region, DataCenter, World, Account, SubRunner, Character, CustomName, Fc, Tag, Members, Level, Subs, Returns, House, Credits }
+    private enum Col { Tp, Login, Region, DataCenter, World, Account, SubRunner, Character, Owner, CustomName, Fc, Tag, Members, Level, Subs, Returns, BidTimer, House, Credits }
 
     // Stable string name per column (used for the saved order list).
     private static readonly (Col col, string name)[] AllColumns =
@@ -302,9 +308,10 @@ public class MainWindow : Window
         (Col.Tp, "TP"), (Col.Login, "LOG"), (Col.Region, "Region"), (Col.DataCenter, "Data Center"),
         (Col.World, "World"),
         (Col.Account, "Account"), (Col.SubRunner, "Sub-runner"), (Col.Character, "Character"),
-        (Col.CustomName, "Custom name"),
+        (Col.Owner, "FC Owner"), (Col.CustomName, "Custom name"),
         (Col.Fc, "Free Company"), (Col.Tag, "Tag"), (Col.Members, "Members"), (Col.Level, "Level"),
-        (Col.Subs, "Subs"), (Col.Returns, "Returns"), (Col.House, "House"), (Col.Credits, "Credits"),
+        (Col.Subs, "Subs"), (Col.Returns, "Returns"), (Col.BidTimer, "Bid Eligible"),
+        (Col.House, "House"), (Col.Credits, "Credits"),
     };
 
     private static bool IsColEnabled(Col c, Configuration cfg) => c switch
@@ -317,6 +324,7 @@ public class MainWindow : Window
         Col.Account => cfg.ColAccount,
         Col.SubRunner => cfg.ColSubRunner,
         Col.Character => cfg.ColCharacter,
+        Col.Owner => cfg.ColOwner,
         Col.CustomName => cfg.ColCustomName,
         Col.Fc => cfg.ColFc,
         Col.Tag => cfg.ColTag,
@@ -324,6 +332,7 @@ public class MainWindow : Window
         Col.Level => cfg.ColLevel,
         Col.Subs => cfg.ColSubs,
         Col.Returns => cfg.ColReturns,
+        Col.BidTimer => cfg.ColBidTimer,
         Col.House => cfg.ColHouse,
         Col.Credits => cfg.ColCredits,
         _ => false,
@@ -432,6 +441,7 @@ public class MainWindow : Window
             case Col.Account: ImGui.TableSetupColumn("Account", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.SubRunner: ImGui.TableSetupColumn("Sub-runner", ImGuiTableColumnFlags.WidthStretch, 1.8f); break;
             case Col.Character: ImGui.TableSetupColumn("Character", ImGuiTableColumnFlags.WidthStretch, 1.8f); break;
+            case Col.Owner: ImGui.TableSetupColumn("FC Owner", ImGuiTableColumnFlags.WidthStretch, 1.4f); break;
             case Col.CustomName: ImGui.TableSetupColumn("Nickname", ImGuiTableColumnFlags.WidthStretch, 1.4f); break;
             case Col.Fc: ImGui.TableSetupColumn("Free Company", ImGuiTableColumnFlags.WidthStretch, 2.0f); break;
             case Col.Tag: ImGui.TableSetupColumn("Tag", ImGuiTableColumnFlags.WidthStretch, 0.7f); break;
@@ -439,6 +449,7 @@ public class MainWindow : Window
             case Col.Level: ImGui.TableSetupColumn("Level", ImGuiTableColumnFlags.WidthStretch, 0.6f); break;
             case Col.Subs: ImGui.TableSetupColumn("Subs", ImGuiTableColumnFlags.WidthStretch, 0.6f); break;
             case Col.Returns: ImGui.TableSetupColumn("Returns", ImGuiTableColumnFlags.WidthStretch, 1.0f); break;
+            case Col.BidTimer: ImGui.TableSetupColumn("Bid Eligible", ImGuiTableColumnFlags.WidthStretch, 1.1f); break;
             case Col.House: ImGui.TableSetupColumn("House", ImGuiTableColumnFlags.WidthStretch, 1.5f); break;
             case Col.Credits: ImGui.TableSetupColumn("Credits", ImGuiTableColumnFlags.WidthStretch, 1.0f); break;
         }
@@ -456,6 +467,7 @@ public class MainWindow : Window
             case Col.Account: DrawSortHeader(FcSortCol.Account, "Account"); break;
             case Col.SubRunner: DrawSortHeader(FcSortCol.SubRunner, "Sub-runner"); break;
             case Col.Character: DrawSortHeader(FcSortCol.Character, "Character"); break;
+            case Col.Owner: DrawSortHeader(FcSortCol.Owner, "FC Owner"); break;
             case Col.CustomName: DrawSortHeader(FcSortCol.CustomName, "Nickname"); break;
             case Col.Fc: DrawSortHeader(FcSortCol.Name, "Free Company"); break;
             case Col.Tag: DrawSortHeader(FcSortCol.Tag, "Tag"); break;
@@ -463,6 +475,7 @@ public class MainWindow : Window
             case Col.Level: DrawSortHeader(FcSortCol.Level, "Level"); break;
             case Col.Subs: DrawSortHeader(FcSortCol.Subs, "Subs"); break;
             case Col.Returns: DrawSortHeader(FcSortCol.Returns, "Returns"); break;
+            case Col.BidTimer: DrawSortHeader(FcSortCol.BidTimer, "Bid Eligible"); break;
             case Col.House: DrawSortHeader(FcSortCol.House, "House"); break;
             case Col.Credits: DrawSortHeader(FcSortCol.Credits, "Credits"); break;
         }
@@ -480,7 +493,7 @@ public class MainWindow : Window
             {
                 fcSort = col;
                 fcSortAsc = col is FcSortCol.Region or FcSortCol.DataCenter or FcSortCol.World or FcSortCol.Account
-                    or FcSortCol.SubRunner or FcSortCol.Character or FcSortCol.CustomName or FcSortCol.Name or FcSortCol.Tag;
+                    or FcSortCol.SubRunner or FcSortCol.Character or FcSortCol.Owner or FcSortCol.CustomName or FcSortCol.Name or FcSortCol.Tag;
             }
         }
         if (active)
@@ -495,8 +508,11 @@ public class MainWindow : Window
     private void DrawFcRow(FcGroup g, Configuration cfg, List<Col> columns, Col triCol)
     {
         var grey = new Vector4(0.6f, 0.6f, 0.6f, 1f);
-        var red = new Vector4(0.85f, 0.5f, 0.5f, 1f);
-        var green = new Vector4(0.5f, 0.85f, 0.5f, 1f);
+        var timer = cfg.Col(cfg.ColorTimer, Configuration.DefTimer);
+        var ready = cfg.Col(cfg.ColorReady, Configuration.DefReady);
+        var subsFull = cfg.Col(cfg.ColorSubsFull, Configuration.DefSubsFull);
+        var subsEmpty = cfg.Col(cfg.ColorSubsEmpty, Configuration.DefSubsEmpty);
+        var levelLow = cfg.Col(cfg.ColorLevelLow, Configuration.DefLevelLow);
         var hasHouse = g.House?.HasHouse == true;
         var isOpen = expandedFcKey == g.Key;
 
@@ -561,6 +577,9 @@ public class MainWindow : Window
                 case Col.Character:
                     ExpandableCell(g, c == triCol, isOpen, string.IsNullOrEmpty(g.FirstCharacterName) ? "-" : g.FirstCharacterName);
                     break;
+                case Col.Owner:
+                    ExpandableCell(g, c == triCol, isOpen, OwnerName(g));
+                    break;
                 case Col.CustomName:
                     ExpandableCell(g, c == triCol, isOpen, CustomName(g));
                     break;
@@ -576,14 +595,14 @@ public class MainWindow : Window
 
                 case Col.Level:
                     if (g.Level == 0) ImGui.TextColored(grey, "-");
-                    else if (g.Level < 6) ImGui.TextColored(red, g.Level.ToString());
+                    else if (g.Level < 6) ImGui.TextColored(levelLow, g.Level.ToString());
                     else ImGui.TextUnformatted(g.Level.ToString());
                     break;
 
                 case Col.Subs:
                     if (!hasHouse) ImGui.TextColored(grey, "-");
                     else if (!g.SubsKnown) ImGui.TextColored(grey, "?/4");
-                    else ImGui.TextColored(g.SubCount == 0 ? red : green, $"{g.SubCount}/4");
+                    else ImGui.TextColored(g.SubCount == 0 ? subsEmpty : subsFull, $"{g.SubCount}/4");
                     break;
 
                 case Col.Returns:
@@ -593,16 +612,28 @@ public class MainWindow : Window
                     }
                     else if (g.SubReturnUnix == 0)
                     {
-                        // Subs known but none deployed -> they're home.
-                        ImGui.TextColored(green, "Back");
+                        ImGui.TextColored(ready, "Back");
                     }
                     else
                     {
                         var remaining = g.SubReturnUnix - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        if (remaining <= 0) ImGui.TextColored(green, "Back");
-                        else ImGui.TextColored(new Vector4(0.85f, 0.8f, 0.45f, 1f), FormatCountdown(remaining));
+                        if (remaining <= 0) ImGui.TextColored(ready, "Back");
+                        else ImGui.TextColored(timer, FormatCountdown(remaining));
                     }
                     break;
+
+                case Col.BidTimer:
+                {
+                    var eligibleAt = GroupSoonestBidEligible(g);
+                    if (eligibleAt == 0) { ImGui.TextColored(grey, "-"); }
+                    else
+                    {
+                        var remaining = eligibleAt - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        if (remaining <= 0) ImGui.TextColored(ready, "Eligible");
+                        else ImGui.TextColored(timer, FormatCountdown(remaining));
+                    }
+                    break;
+                }
 
                 case Col.House:
                     ImGui.TextUnformatted(ShortHouseAddress(g.House));
@@ -654,6 +685,38 @@ public class MainWindow : Window
         return plugin.Config.CustomFcNames.TryGetValue(g.Key, out var n) && !string.IsNullOrEmpty(n) ? n : "-";
     }
 
+    // FC owner: user override if set, else the first character name seen.
+    private string OwnerName(FcGroup g)
+    {
+        if (plugin.Config.FcOwnerNames.TryGetValue(g.Key, out var n) && !string.IsNullOrEmpty(n))
+            return n;
+        return string.IsNullOrEmpty(g.FirstCharacterNameRaw) ? "-" : g.FirstCharacterNameRaw;
+    }
+
+    // Bid eligibility start (unix secs) for a character: override if set, else its
+    // first-seen-in-FC time.
+    private long BidStartUnix(CharacterRecord m)
+    {
+        if (plugin.Config.BidStartOverrideUnix.TryGetValue(m.ContentId, out var ov) && ov > 0)
+            return ov;
+        return ((DateTimeOffset)DateTime.SpecifyKind(m.FirstSeenInFcUtc, DateTimeKind.Utc)).ToUnixTimeSeconds();
+    }
+
+    private long BidEligibleUnix(CharacterRecord m)
+        => BidStartUnix(m) + (long)plugin.Config.BidEligibilityDays * 86400L;
+
+    // The soonest-eligible tracked member's eligible-at time for the FC row summary.
+    private long GroupSoonestBidEligible(FcGroup g)
+    {
+        long soonest = long.MaxValue;
+        foreach (var m in g.TrackedMembers)
+        {
+            var e = BidEligibleUnix(m);
+            if (e < soonest) soonest = e;
+        }
+        return soonest == long.MaxValue ? 0 : soonest;
+    }
+
     private string AccountAliasLabel(string accountKey)
     {
         if (string.IsNullOrEmpty(accountKey)) return "-";
@@ -686,6 +749,17 @@ public class MainWindow : Window
             plugin.Config.Save();
         }
 
+        // FC Owner (editable; defaults to first character seen).
+        plugin.Config.FcOwnerNames.TryGetValue(g.Key, out var owner);
+        owner ??= string.Empty;
+        ImGui.SetNextItemWidth(280 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputTextWithHint($"FC Owner###owner{g.Key}", g.FirstCharacterNameRaw, ref owner, 64))
+        {
+            if (string.IsNullOrEmpty(owner)) plugin.Config.FcOwnerNames.Remove(g.Key);
+            else plugin.Config.FcOwnerNames[g.Key] = owner;
+            plugin.Config.Save();
+        }
+
         var winner = holder.ManualHouseWinner;
         ImGui.SetNextItemWidth(280 * ImGuiHelpers.GlobalScale);
         if (ImGui.InputText($"Original winner###winner{g.Key}", ref winner, 128))
@@ -702,13 +776,18 @@ public class MainWindow : Window
 
         // Characters table: all tracked members of this FC.
         ImGui.TextUnformatted("Characters");
-        if (ImGui.BeginTable($"##fcmembers{g.Key}", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        if (ImGui.BeginTable($"##fcmembers{g.Key}", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
             ImGui.TableSetupColumn("Character");
             ImGui.TableSetupColumn("Rank in FC");
             ImGui.TableSetupColumn("Days in FC");
             ImGui.TableSetupColumn("Account");
+            ImGui.TableSetupColumn("Bid Eligible");
             ImGui.TableHeadersRow();
+
+            var timerCol = plugin.Config.Col(plugin.Config.ColorTimer, Configuration.DefTimer);
+            var readyCol = plugin.Config.Col(plugin.Config.ColorReady, Configuration.DefReady);
+            var daysNewCol = plugin.Config.Col(plugin.Config.ColorDaysNew, Configuration.DefDaysNew);
 
             foreach (var m in g.TrackedMembers)
             {
@@ -723,11 +802,40 @@ public class MainWindow : Window
 
                 ImGui.TableNextColumn();
                 var days = (int)(DateTime.UtcNow - m.FirstSeenInFcUtc).TotalDays;
-                if (days <= 30) ImGui.TextColored(new Vector4(0.85f, 0.5f, 0.5f, 1f), days.ToString());
+                if (days <= plugin.Config.BidEligibilityDays) ImGui.TextColored(daysNewCol, days.ToString());
                 else ImGui.TextUnformatted(days.ToString());
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(string.IsNullOrEmpty(m.AccountKey) ? "-" : AccountAliasLabel(m.AccountKey));
+
+                // Bid eligibility: countdown/status + set-start / reset controls.
+                ImGui.TableNextColumn();
+                var eligibleAt = BidEligibleUnix(m);
+                var remaining = eligibleAt - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (remaining <= 0) ImGui.TextColored(readyCol, "Eligible");
+                else ImGui.TextColored(timerCol, FormatCountdown(remaining));
+
+                ImGui.SameLine();
+                ImGui.PushID($"bid{m.ContentId}");
+                if (ImGui.SmallButton("Set start"))
+                {
+                    plugin.Config.BidStartOverrideUnix[m.ContentId] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    plugin.Config.Save();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Set the eligibility start to now (e.g. the day you registered this character's FC application).");
+                if (plugin.Config.BidStartOverrideUnix.ContainsKey(m.ContentId))
+                {
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Reset"))
+                    {
+                        plugin.Config.BidStartOverrideUnix.Remove(m.ContentId);
+                        plugin.Config.Save();
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Clear the override; falls back to first-seen date.");
+                }
+                ImGui.PopID();
             }
             ImGui.EndTable();
         }
