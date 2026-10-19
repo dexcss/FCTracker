@@ -21,9 +21,20 @@ public class VesselRecord
     public ushort BridgeId;
 
     // Community-standard build shorthand, e.g. "SSUC++". Computed from the part ids
-    // the same way Submarine Tracker does it (no sheet lookup needed).
-    public string Build =>
-        PartLetter(HullId) + PartLetter(SternId) + PartLetter(BowId) + PartLetter(BridgeId);
+    // exactly like SubmarineTracker's Build.ToIdentifier/FullIdentifier: per-part
+    // letters with a "+" for the unlock-tier parts (ids 21-40), and when all four
+    // parts carry a plus, the shorthand compresses to a trailing "++".
+    public string Build
+    {
+        get
+        {
+            var id = PartLetter(HullId) + PartLetter(SternId) + PartLetter(BowId) + PartLetter(BridgeId);
+            var pluses = 0;
+            foreach (var ch in id)
+                if (ch == '+') pluses++;
+            return pluses == 4 ? id.Replace("+", "") + "++" : id;
+        }
+    }
 
     private static string PartLetter(ushort partId)
     {
@@ -104,6 +115,7 @@ public class FreeCompanySnapshot
     public ushort OnlineMembers;
     public ushort TotalMembers;
     public ushort HomeWorldId;
+    public string HomeWorldName = string.Empty; // resolved from HomeWorldId (the FC's world)
     public byte GrandCompany;
     public string Region = string.Empty;   // short code: JP/NA/EU/OCE/CN/KR/CLD/TCN
     public string DataCenter = string.Empty; // e.g. Aether, Crystal, Gaia

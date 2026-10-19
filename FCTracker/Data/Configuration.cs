@@ -29,16 +29,12 @@ public class Configuration : IPluginConfiguration
     public string SubmarineTrackerDbPath = string.Empty;
 
     // View options.
-    public bool GroupByFc = false;          // false = flat character list (default)
-    public bool ShowAccountColumn = false;  // optional account-alias column/tag
+    // (The old GroupByFc/ShowAccountColumn/ShowRegionColumn/ShowLoginButton/
+    //  ShowFounderAndTime flags were removed — they were never read anymore.)
 
     // Optional (off by default) fields that aren't cleanly readable:
     public bool ShowMemberFcRank = false;   // best-effort scrape of own FC rank
-    public bool ShowFounderAndTime = false; // founder/original-winner + time-in-FC
 
-    // Optional columns (checkmark in settings).
-    public bool ShowLoginButton = false;    // door icon to log into a character (Lifestream)
-    public bool ShowRegionColumn = false;   // region column in both views
     public bool SubsortByRegion = false;    // group rows by region, then secondary sort
     public bool ManualColumnResize = false; // true = draggable column borders; false = auto-fit
 
@@ -74,11 +70,15 @@ public class Configuration : IPluginConfiguration
     // Keyed by the stable FC key.
     public Dictionary<string, string> FcOwnerNames = new();
 
-    // Housing bid eligibility: 30 days from a start date. Per character (ContentId),
+    // Housing bid eligibility: N days from a start date. Per character (ContentId),
     // the start date defaults to first-seen but can be overridden. Stored as unix
     // seconds; 0 = use the character's FirstSeenInFcUtc.
     public Dictionary<ulong, long> BidStartOverrideUnix = new();
     public int BidEligibilityDays = 30;
+
+    // Per-FC override of BidEligibilityDays (keyed by the stable FC key).
+    // Absent or <= 0 = use the global BidEligibilityDays.
+    public Dictionary<string, int> FcBidEligibilityDays = new();
 
     // Customizable colors (RGBA 0-1, stored as float[4]). Null = use default.
     public float[]? ColorTimer;      // sub return countdown / bid countdown text
@@ -102,7 +102,19 @@ public class Configuration : IPluginConfiguration
 
     public void Initialize(IDalamudPluginInterface pi) => pluginInterface = pi;
 
-    public void Save() => pluginInterface?.SavePluginConfig(this);
+    // Serializing from two threads at once (framework poll vs. UI edits) can tear the
+    // output file; a save lock keeps SavePluginConfig serialized.
+    private static readonly object SaveLock = new();
+
+    public void Save()
+    {
+        lock (SaveLock) pluginInterface?.SavePluginConfig(this);
+    }
+
+    // Guards in-place mutations of Characters (framework-thread Add/Remove vs.
+    // UI-thread enumeration). The shared-storage refresh swaps the list reference
+    // atomically and needs no lock; only in-place mutation does.
+    public readonly object RecordsLock = new();
 
     // Default semantic colors (RGBA).
     public static readonly float[] DefTimer = { 0.85f, 0.8f, 0.45f, 1f };
@@ -121,24 +133,27 @@ public class Configuration : IPluginConfiguration
 
     public CharacterRecord GetOrCreate(ulong contentId, string name, string world)
     {
-        foreach (var c in Characters)
+        lock (RecordsLock)
         {
-            if (c.ContentId == contentId)
+            foreach (var c in Characters)
             {
-                // keep name/world fresh
-                if (!string.IsNullOrEmpty(name)) c.CharacterName = name;
-                if (!string.IsNullOrEmpty(world)) c.WorldName = world;
-                return c;
+                if (c.ContentId == contentId)
+                {
+                    // keep name/world fresh
+                    if (!string.IsNullOrEmpty(name)) c.CharacterName = name;
+                    if (!string.IsNullOrEmpty(world)) c.WorldName = world;
+                    return c;
+                }
             }
-        }
 
-        var rec = new CharacterRecord
-        {
-            ContentId = contentId,
-            CharacterName = name,
-            WorldName = world,
-        };
-        Characters.Add(rec);
-        return rec;
+            var rec = new CharacterRecord
+            {
+                ContentId = contentId,
+                CharacterName = name,
+                WorldName = world,
+            };
+            Characters.Add(rec);
+            return rec;
+        }
     }
 }

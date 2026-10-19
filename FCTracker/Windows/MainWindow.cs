@@ -27,8 +27,6 @@ public class MainWindow : Window
     }
 
     // Deferred actions (applied after the draw loop).
-    private ulong pendingDeleteCid;
-    private ulong pendingClearFcCid;
     private readonly List<ulong> pendingClearFcCids = new();
     private bool pendingClearAll;
 
@@ -80,37 +78,51 @@ public class MainWindow : Window
     {
         var config = plugin.Config;
 
-        // Opportunistically pull AutoRetainer info (workshop runner flag, etc).
-        plugin.EnrichFromAutoRetainer();
+        // Snapshot the records once per frame: the framework thread mutates the list
+        // in place (GetOrCreate adds on login), so enumerating it directly can throw
+        // "collection was modified". The list reference swap from the shared-store
+        // refresh is atomic; only in-place mutation needs this.
+        List<CharacterRecord> chars;
+        lock (config.RecordsLock)
+            chars = new List<CharacterRecord>(config.Characters);
 
-        DrawTopBar(config);
+        DrawTopBar(config, chars);
 
-        if (config.Characters.Count == 0)
+        if (chars.Count == 0)
         {
             ImGui.TextWrapped(
                 "No data yet. Log into a character that is in a Free Company. " +
                 "Open the Free Company window to capture level/credits, and " +
                 "stand in your FC workshop to capture airships and submersibles.");
+            ImGui.TextDisabled("You can also import data you already have:");
+            if (ImGui.Button("Open Settings"))
+                plugin.OpenSettings();
             return;
         }
 
-        var groups = BuildGroups(config.Characters);
+        var groups = BuildGroups(chars);
         DrawFcTable(groups, config);
 
         ApplyPendingActions();
     }
 
-    private void DrawTopBar(Configuration config)
+    private void DrawTopBar(Configuration config, List<CharacterRecord> chars)
     {
+        // Count distinct FCs and distinct houses (a shared FC house must not count
+        // once per tracked character).
         var fcIds = new HashSet<ulong>();
-        var houses = 0;
-        foreach (var c in config.Characters)
+        var houseKeys = new HashSet<string>();
+        foreach (var c in chars)
         {
-            if (c.Fc != null && c.Fc.FreeCompanyId != 0) fcIds.Add(c.Fc.FreeCompanyId);
-            if (c.Fc?.House != null && c.Fc.House.HasHouse) houses++;
+            if (c.Fc == null) continue;
+            if (c.Fc.FreeCompanyId != 0) fcIds.Add(c.Fc.FreeCompanyId);
+            if (c.Fc.House is { HasHouse: true })
+                houseKeys.Add(c.Fc.FreeCompanyId != 0
+                    ? $"id:{c.Fc.FreeCompanyId}"
+                    : $"name:{c.Fc.Name}");
         }
 
-        ImGui.TextDisabled($"{config.Characters.Count} characters · {fcIds.Count} FCs · {houses} houses");
+        ImGui.TextDisabled($"{chars.Count} characters · {fcIds.Count} FCs · {houseKeys.Count} houses");
 
         var gear = "Settings";
         var gearW = ImGui.CalcTextSize(gear).X + ImGui.GetStyle().FramePadding.X * 2;
@@ -157,7 +169,9 @@ public class MainWindow : Window
                     Tag = fc?.Tag ?? "",
                     Region = fc?.Region ?? "",
                     DataCenter = fc?.DataCenter ?? "",
-                    World = c.WorldName,
+                    // Prefer the FC's own home world (an FC can have members from
+                    // several worlds of the data center).
+                    World = !string.IsNullOrEmpty(fc?.HomeWorldName) ? fc.HomeWorldName : c.WorldName,
                     Members = fc?.TotalMembers ?? 0,
                     Level = fc?.Rank ?? 0,
                     Credits = fc?.CreditsText ?? "",
@@ -259,7 +273,7 @@ public class MainWindow : Window
             FcSortCol.SubRunner => (a, b) => string.Compare(a.SubRunnerName, b.SubRunnerName, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Character => (a, b) => string.Compare(a.FirstCharacterName, b.FirstCharacterName, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Owner => (a, b) => string.Compare(OwnerName(a), OwnerName(b), StringComparison.OrdinalIgnoreCase),
-            FcSortCol.BidTimer => (a, b) => GroupSoonestBidEligible(a).CompareTo(GroupSoonestBidEligible(b)),
+            FcSortCol.BidTimer => (a, b) => BidSortVal(a).CompareTo(BidSortVal(b)),
             FcSortCol.CustomName => (a, b) => string.Compare(CustomName(a), CustomName(b), StringComparison.OrdinalIgnoreCase),
             FcSortCol.Name => (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
             FcSortCol.Tag => (a, b) => string.Compare(a.Tag, b.Tag, StringComparison.OrdinalIgnoreCase),
@@ -298,6 +312,15 @@ public class MainWindow : Window
     // (soonest = smallest). "Back" (past) times naturally sort before pending ones.
     private static long ReturnSortVal(FcGroup g)
         => g.SubReturnKnown ? g.SubReturnUnix : long.MaxValue;
+
+    // Sort key for the Bid Eligible column. GroupSoonestBidEligible returns 0 for
+    // "no data" (rendered as "-"), which would otherwise sort ahead of every real
+    // timestamp; map it to MaxValue so unknowns sort last like the Returns column.
+    private long BidSortVal(FcGroup g)
+    {
+        var e = GroupSoonestBidEligible(g);
+        return e == 0 ? long.MaxValue : e;
+    }
 
     // Column identity for visibility + ordering.
     private enum Col { Tp, Login, Region, DataCenter, World, Account, SubRunner, Character, Owner, CustomName, Fc, Tag, Members, Level, Subs, Returns, BidTimer, House, Credits }
@@ -526,12 +549,15 @@ public class MainWindow : Window
                 case Col.Tp:
                     if (hasHouse && g.House != null && !g.House.IsApartment)
                     {
+                        // The FC estate lives on the FC's world; HouseRecord carries it
+                        // (resolved at read time) and beats the row's fallback world.
+                        var tpWorld = !string.IsNullOrEmpty(g.House.WorldName) ? g.House.WorldName : g.World;
                         ImGui.PushID($"go{g.Key}");
                         if (ImGuiComponents.IconButton(FontAwesomeIcon.LocationArrow))
-                            PluginIpc.LifestreamGoToAddress(g.World, g.House.District, g.House.Ward, g.House.Plot);
+                            PluginIpc.LifestreamGoToAddress(tpWorld, g.House.District, g.House.Ward, g.House.Plot);
                         ImGui.PopID();
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip($"Lifestream to {g.World} {g.House.District} W{g.House.Ward} P{g.House.Plot}");
+                            ImGui.SetTooltip($"Lifestream to {tpWorld} {g.House.District} W{g.House.Ward} P{g.House.Plot}");
                     }
                     else ImGui.TextDisabled("");
                     break;
@@ -702,8 +728,15 @@ public class MainWindow : Window
         return ((DateTimeOffset)DateTime.SpecifyKind(m.FirstSeenInFcUtc, DateTimeKind.Utc)).ToUnixTimeSeconds();
     }
 
-    private long BidEligibleUnix(CharacterRecord m)
-        => BidStartUnix(m) + (long)plugin.Config.BidEligibilityDays * 86400L;
+    // Effective bid-eligibility window for this FC: per-FC override when set,
+    // otherwise the global default.
+    private int BidDaysFor(FcGroup g)
+        => plugin.Config.FcBidEligibilityDays.TryGetValue(g.Key, out var d) && d > 0
+            ? d
+            : plugin.Config.BidEligibilityDays;
+
+    private long BidEligibleUnix(FcGroup g, CharacterRecord m)
+        => BidStartUnix(m) + (long)BidDaysFor(g) * 86400L;
 
     // The soonest-eligible tracked member's eligible-at time for the FC row summary.
     private long GroupSoonestBidEligible(FcGroup g)
@@ -711,7 +744,11 @@ public class MainWindow : Window
         long soonest = long.MaxValue;
         foreach (var m in g.TrackedMembers)
         {
-            var e = BidEligibleUnix(m);
+            // An unset FirstSeenInFcUtc (DateTime.MinValue, e.g. from an older import)
+            // yields a pre-epoch start. Treat that as "no data" instead of reporting
+            // the character as already eligible.
+            if (BidStartUnix(m) <= 0) continue;
+            var e = BidEligibleUnix(g, m);
             if (e < soonest) soonest = e;
         }
         return soonest == long.MaxValue ? 0 : soonest;
@@ -739,6 +776,9 @@ public class MainWindow : Window
         // Additional info: Custom name, Original Winner (editable), first reg, last update.
         var holder = g.TrackedMembers[0];
 
+        // Text inputs apply their value on every keystroke, but persisting on every
+        // keystroke rewrites the config/shared file per character typed — save on
+        // deactivate (Enter/Tab/click-away) instead.
         plugin.Config.CustomFcNames.TryGetValue(g.Key, out var custom);
         custom ??= string.Empty;
         ImGui.SetNextItemWidth(280 * ImGuiHelpers.GlobalScale);
@@ -746,8 +786,9 @@ public class MainWindow : Window
         {
             if (string.IsNullOrEmpty(custom)) plugin.Config.CustomFcNames.Remove(g.Key);
             else plugin.Config.CustomFcNames[g.Key] = custom;
-            plugin.Config.Save();
         }
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            plugin.Config.Save();
 
         // FC Owner (editable; defaults to first character seen).
         plugin.Config.FcOwnerNames.TryGetValue(g.Key, out var owner);
@@ -757,16 +798,28 @@ public class MainWindow : Window
         {
             if (string.IsNullOrEmpty(owner)) plugin.Config.FcOwnerNames.Remove(g.Key);
             else plugin.Config.FcOwnerNames[g.Key] = owner;
-            plugin.Config.Save();
         }
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            plugin.Config.Save();
 
         var winner = holder.ManualHouseWinner;
         ImGui.SetNextItemWidth(280 * ImGuiHelpers.GlobalScale);
         if (ImGui.InputText($"Original winner###winner{g.Key}", ref winner, 128))
-        {
             holder.ManualHouseWinner = winner;
+        if (ImGui.IsItemDeactivatedAfterEdit())
             plugin.PersistCharacter(holder);
+
+        // Per-FC bid-eligibility window override (housing rules/timing can differ
+        // per FC; 0 = use the global default from Settings).
+        var fcDays = plugin.Config.FcBidEligibilityDays.TryGetValue(g.Key, out var d) ? d : 0;
+        ImGui.SetNextItemWidth(120 * ImGuiHelpers.GlobalScale);
+        if (ImGui.InputInt($"Bid days override (0 = global {plugin.Config.BidEligibilityDays})###bidays{g.Key}", ref fcDays))
+        {
+            if (fcDays > 0) plugin.Config.FcBidEligibilityDays[g.Key] = Math.Clamp(fcDays, 1, 365);
+            else plugin.Config.FcBidEligibilityDays.Remove(g.Key);
+            plugin.Config.Save();
         }
+        ImGui.TextDisabled("Days before this FC's characters can bid; overrides the global setting when non-zero.");
 
         ImGui.TextDisabled($"First registered: {ToLocal(EarliestFirstSeen(g))}");
         if (holder.Fc != null)
@@ -801,19 +854,35 @@ public class MainWindow : Window
                 ImGui.TextUnformatted(!string.IsNullOrEmpty(m.MyFcRank) ? m.MyFcRank : "-");
 
                 ImGui.TableNextColumn();
-                var days = (int)(DateTime.UtcNow - m.FirstSeenInFcUtc).TotalDays;
-                if (days <= plugin.Config.BidEligibilityDays) ImGui.TextColored(daysNewCol, days.ToString());
-                else ImGui.TextUnformatted(days.ToString());
+                if (m.FirstSeenInFcUtc.Year < 2000)
+                {
+                    // Never recorded (e.g. an older import) — don't print ~740000 days.
+                    ImGui.TextDisabled("-");
+                }
+                else
+                {
+                    var days = (int)(DateTime.UtcNow - m.FirstSeenInFcUtc).TotalDays;
+                    if (days <= BidDaysFor(g)) ImGui.TextColored(daysNewCol, days.ToString());
+                    else ImGui.TextUnformatted(days.ToString());
+                }
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(string.IsNullOrEmpty(m.AccountKey) ? "-" : AccountAliasLabel(m.AccountKey));
 
                 // Bid eligibility: countdown/status + set-start / reset controls.
                 ImGui.TableNextColumn();
-                var eligibleAt = BidEligibleUnix(m);
-                var remaining = eligibleAt - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                if (remaining <= 0) ImGui.TextColored(readyCol, "Eligible");
-                else ImGui.TextColored(timerCol, FormatCountdown(remaining));
+                if (BidStartUnix(m) <= 0)
+                {
+                    // No known start date; "Set start" below establishes one.
+                    ImGui.TextDisabled("-");
+                }
+                else
+                {
+                    var eligibleAt = BidEligibleUnix(g, m);
+                    var remaining = eligibleAt - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                    if (remaining <= 0) ImGui.TextColored(readyCol, "Eligible");
+                    else ImGui.TextColored(timerCol, FormatCountdown(remaining));
+                }
 
                 ImGui.SameLine();
                 ImGui.PushID($"bid{m.ContentId}");
@@ -858,10 +927,9 @@ public class MainWindow : Window
         ImGui.TextUnformatted("Notes");
         var notes = holder.ManualNotes;
         if (ImGui.InputTextMultiline($"##notes{g.Key}", ref notes, 2048, new Vector2(-1, 80 * ImGuiHelpers.GlobalScale)))
-        {
             holder.ManualNotes = notes;
+        if (ImGui.IsItemDeactivatedAfterEdit())
             plugin.PersistCharacter(holder);
-        }
 
         ImGuiHelpers.ScaledDummy(6f);
         ImGui.Separator();
@@ -910,19 +978,34 @@ public class MainWindow : Window
         if (c.VesselsLastUpdatedUtc.HasValue)
             ImGui.TextDisabled($"Updated: {ToLocal(c.VesselsLastUpdatedUtc.Value)} (stand in workshop to refresh)");
 
-        if (ImGui.BeginTable($"##{title}tbl{c.ContentId}", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        // Captured return times keep counting down after capture, so the countdown
+        // stays useful between workshop visits.
+        var timerCol = plugin.Config.Col(plugin.Config.ColorTimer, Configuration.DefTimer);
+        var readyCol = plugin.Config.Col(plugin.Config.ColorReady, Configuration.DefReady);
+
+        if (ImGui.BeginTable($"##{title}tbl{c.ContentId}", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
             ImGui.TableSetupColumn("Name");
             ImGui.TableSetupColumn("Rank");
             ImGui.TableSetupColumn("Build");
+            ImGui.TableSetupColumn("Returns");
             ImGui.TableHeadersRow();
 
+            var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             foreach (var v in vessels)
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn(); ImGui.Text(v.Name);
                 ImGui.TableNextColumn(); ImGui.Text(v.RankId.ToString());
                 ImGui.TableNextColumn(); ImGui.Text(v.Build);
+                ImGui.TableNextColumn();
+                if (v.ReturnTime == 0) ImGui.TextDisabled("-");
+                else
+                {
+                    var remaining = (long)v.ReturnTime - now;
+                    if (remaining <= 0) ImGui.TextColored(readyCol, "Back");
+                    else ImGui.TextColored(timerCol, FormatCountdown(remaining));
+                }
             }
             ImGui.EndTable();
         }
@@ -930,16 +1013,6 @@ public class MainWindow : Window
 
     private void ApplyPendingActions()
     {
-        if (pendingDeleteCid != 0)
-        {
-            plugin.DeleteCharacter(pendingDeleteCid);
-            pendingDeleteCid = 0;
-        }
-        if (pendingClearFcCid != 0)
-        {
-            plugin.ClearFcData(pendingClearFcCid);
-            pendingClearFcCid = 0;
-        }
         if (pendingClearFcCids.Count > 0)
         {
             foreach (var cid in pendingClearFcCids)
@@ -959,7 +1032,8 @@ public class MainWindow : Window
         var ts = TimeSpan.FromSeconds(seconds);
         if (ts.TotalDays >= 1) return $"{(int)ts.TotalDays}d {ts.Hours}h";
         if (ts.TotalHours >= 1) return $"{ts.Hours}h {ts.Minutes}m";
-        return $"{ts.Minutes}m";
+        if (ts.TotalMinutes >= 1) return $"{ts.Minutes}m";
+        return "<1m";
     }
 
     private static string ToLocal(DateTime utc) => utc.ToLocalTime().ToString("g");

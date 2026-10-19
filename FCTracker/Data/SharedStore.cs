@@ -43,7 +43,7 @@ public sealed class SharedStore
             Directory.CreateDirectory(dir);
     }
 
-    public string Path_ => path;
+    public string FilePath => path;
 
     private sealed class StoreFile
     {

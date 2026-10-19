@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
@@ -28,6 +29,8 @@ public class SettingsWindow : Window
     public override void Draw()
     {
         var config = plugin.Config;
+
+        ImGui.TextDisabled($"FC Tracker v{typeof(Plugin).Assembly.GetName().Version?.ToString(3)} — Dalamud API 15");
 
         // --- View ---
         ImGui.TextUnformatted("View");
@@ -163,9 +166,13 @@ public class SettingsWindow : Window
                           "for each FC's sub-runner.");
 
         // Gather distinct roaming paths across tracked characters, plus this client's.
+        // Snapshot: the framework thread can mutate the records list mid-frame.
         var paths = new System.Collections.Generic.SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrEmpty(plugin.AccountKey)) paths.Add(plugin.AccountKey);
-        foreach (var c in config.Characters)
+        List<CharacterRecord> aliasSnapshot;
+        lock (config.RecordsLock)
+            aliasSnapshot = new List<CharacterRecord>(config.Characters);
+        foreach (var c in aliasSnapshot)
             if (!string.IsNullOrEmpty(c.AccountKey)) paths.Add(c.AccountKey);
 
         if (paths.Count == 0)
@@ -188,11 +195,10 @@ public class SettingsWindow : Window
                 config.AccountAliases.TryGetValue(path, out var alias);
                 alias ??= string.Empty;
                 ImGui.SetNextItemWidth(-1);
-                if (ImGui.InputText($"###alias{path.GetHashCode()}", ref alias, 64))
-                {
+                if (ImGui.InputText($"###alias{path}", ref alias, 64))
                     config.AccountAliases[path] = alias;
+                if (ImGui.IsItemDeactivatedAfterEdit())
                     config.Save();
-                }
             }
             ImGui.EndTable();
         }
@@ -213,16 +219,16 @@ public class SettingsWindow : Window
         ImGui.TextDisabled("Reads/writes a single file under %APPDATA%, independent of --roamingPath.");
 
         if (config.UseSharedStorage && plugin.Store != null)
-            ImGui.TextDisabled($"Path: {plugin.Store.Path_}");
+            ImGui.TextDisabled($"Path: {plugin.Store.FilePath}");
 
         var ov = config.SharedStoragePathOverride;
         if (ImGui.InputText("Path override (optional)###pathoverride", ref ov, 512))
-        {
             config.SharedStoragePathOverride = ov;
-            config.Save();
-        }
         if (ImGui.IsItemDeactivatedAfterEdit())
+        {
+            config.Save();
             plugin.InitStore();
+        }
 
         ImGuiHelpers.ScaledDummy(6f);
 
@@ -235,18 +241,16 @@ public class SettingsWindow : Window
         var arPath = config.AutoRetainerConfigPath;
         if (ImGui.InputTextWithHint("AutoRetainer config###arpath",
                 Importer.DefaultAutoRetainerConfig(), ref arPath, 512))
-        {
             config.AutoRetainerConfigPath = arPath;
+        if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
-        }
 
         var stPath = config.SubmarineTrackerDbPath;
         if (ImGui.InputTextWithHint("SubmarineTracker db###stpath",
                 Importer.DefaultSubmarineTrackerDb(), ref stPath, 512))
-        {
             config.SubmarineTrackerDbPath = stPath;
+        if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
-        }
 
         if (ImGui.Button("Import from AutoRetainer"))
             importSummary = plugin.RunImport(autoRetainer: true, submarineTracker: false);
@@ -336,10 +340,15 @@ public class SettingsWindow : Window
 
     private static void ColorEdit(string label, ref float[]? stored, float[] def, Configuration config)
     {
+        // Mirror Configuration.Col: a stored array that isn't a full RGBA falls back
+        // to the default rather than indexing out of range.
         var cur = stored ?? def;
-        var v = new Vector4(cur[0], cur[1], cur[2], cur.Length > 3 ? cur[3] : 1f);
+        if (cur.Length < 4) cur = def;
+        var v = new Vector4(cur[0], cur[1], cur[2], cur[3]);
         ImGui.PushID(label);
-        if (ImGui.ColorEdit4(label, ref v))
+        // NoInputs keeps this to a swatch + label (click opens the full picker);
+        // the default shows four wide drag fields and crowds the Reset button off.
+        if (ImGui.ColorEdit4(label, ref v, ImGuiColorEditFlags.NoInputs))
         {
             stored = new[] { v.X, v.Y, v.Z, v.W };
             config.Save();

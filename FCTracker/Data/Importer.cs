@@ -40,7 +40,7 @@ public static class Importer
     // Given an import file path like …\<roamingRoot>\pluginConfigs\<Plugin>\file,
     // walk up to the roaming root so it matches our own AccountKey scheme. Returns
     // "" if the path doesn't look like a plugin-config path.
-    private static string AccountKeyFromConfigPath(string filePath, string pluginFolder)
+    private static string AccountKeyFromConfigPath(string filePath)
     {
         try
         {
@@ -69,7 +69,7 @@ public static class Importer
             // Derive the account key from the config's roaming root (…\XIVLauncher\
             // pluginConfigs\AutoRetainer\DefaultConfig.json -> roaming root), so
             // imported characters are tagged with the account they came from.
-            var importAccountKey = AccountKeyFromConfigPath(path, "AutoRetainer");
+            var importAccountKey = AccountKeyFromConfigPath(path);
 
             var root = JObject.Parse(File.ReadAllText(path));
 
@@ -183,7 +183,7 @@ public static class Importer
         var res = new ImportResult();
         try
         {
-            var importAccountKey = AccountKeyFromConfigPath(dbPath, "SubmarineTracker");
+            var importAccountKey = AccountKeyFromConfigPath(dbPath);
             if (!File.Exists(dbPath))
             {
                 res.Messages.Add($"SubmarineTracker database not found at {dbPath}");

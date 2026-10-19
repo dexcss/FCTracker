@@ -117,61 +117,80 @@ public static unsafe class GameReader
 
     // Decode a null-terminated UTF8 string from a byte span (used for inline
     // struct strings that aren't declared with isString).
+    // World-sheet lookups are needed every poll (region/DC/world name). The sheet
+    // never changes at runtime, so resolve it once into dictionaries and serve all
+    // subsequent lookups from cache instead of iterating the sheet per call.
+    private static readonly object WorldCacheLock = new();
+    private static Dictionary<string, (string region, string dc)>? worldInfoByName;
+    private static Dictionary<uint, string>? worldNameById;
+
+    private static void EnsureWorldCache(IDataManager data)
+    {
+        lock (WorldCacheLock)
+        {
+            if (worldInfoByName != null && worldNameById != null) return;
+
+            var byName = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
+            var byId = new Dictionary<uint, string>();
+            try
+            {
+                var worlds = data.GetExcelSheet<Lumina.Excel.Sheets.World>();
+                if (worlds != null)
+                {
+                    foreach (var w in worlds)
+                    {
+                        var name = w.Name.ExtractText();
+                        if (string.IsNullOrEmpty(name)) continue;
+
+                        var dcRef = w.DataCenter;
+                        var regionId = (byte)dcRef.Value.Region.RowId; // RowRef -> row id
+
+                        var dcGroupName = string.Empty;
+                        try
+                        {
+                            var dcGroup = data.GetExcelSheet<Lumina.Excel.Sheets.WorldDCGroupType>()
+                                ?.GetRowOrDefault((uint)regionId);
+                            if (dcGroup.HasValue) dcGroupName = dcGroup.Value.Name.ExtractText();
+                        }
+                        catch { /* ignore */ }
+
+                        byName[name] = (RegionAlias(dcGroupName, regionId), dcRef.ValueNullable?.Name.ExtractText() ?? "");
+                        byId[w.RowId] = name;
+                    }
+                }
+            }
+            catch { /* ignore — empty cache degrades to empty lookups, same as before */ }
+            worldInfoByName = byName;
+            worldNameById = byId;
+        }
+    }
+
     // Resolves a world name to a short region code (JP/NA/EU/OCE/CN/KR/CLD/TCN/DEV)
-    // via World -> DataCenter -> Region. Uses the region's Name string mapped through
-    // the requested aliases, with a RowId fallback.
+    // via World -> DataCenter -> Region.
     public static string ResolveRegionCode(IDataManager data, string worldName)
     {
         if (string.IsNullOrEmpty(worldName)) return "";
-        try
-        {
-            var worlds = data.GetExcelSheet<Lumina.Excel.Sheets.World>();
-            if (worlds == null) return "";
-
-            foreach (var w in worlds)
-            {
-                if (!w.Name.ExtractText().Equals(worldName, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var dcRef = w.DataCenter;
-                var regionId = (byte)dcRef.Value.Region.RowId; // RowRef -> row id
-
-                // Try the region's name string for the alias table.
-                var regionName = string.Empty;
-                try
-                {
-                    var dcGroup = data.GetExcelSheet<Lumina.Excel.Sheets.WorldDCGroupType>()
-                        ?.GetRowOrDefault((uint)regionId);
-                    if (dcGroup.HasValue) regionName = dcGroup.Value.Name.ExtractText();
-                }
-                catch { /* ignore */ }
-
-                return RegionAlias(regionName, regionId);
-            }
-        }
-        catch { /* ignore */ }
-        return "";
+        EnsureWorldCache(data);
+        lock (WorldCacheLock)
+            return worldInfoByName!.TryGetValue(worldName, out var v) ? v.region : "";
     }
 
     // Resolves a world name to its data-center name (e.g. "Aether", "Gaia").
     public static string ResolveDataCenter(IDataManager data, string worldName)
     {
         if (string.IsNullOrEmpty(worldName)) return "";
-        try
-        {
-            var worlds = data.GetExcelSheet<Lumina.Excel.Sheets.World>();
-            if (worlds == null) return "";
-            foreach (var w in worlds)
-            {
-                if (!w.Name.ExtractText().Equals(worldName, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                var dc = w.DataCenter.ValueNullable;
-                if (dc == null) return "";
-                return dc.Value.Name.ExtractText();
-            }
-        }
-        catch { /* ignore */ }
-        return "";
+        EnsureWorldCache(data);
+        lock (WorldCacheLock)
+            return worldInfoByName!.TryGetValue(worldName, out var v) ? v.dc : "";
+    }
+
+    // Resolves a world row id to its name (used for the FC's home world).
+    public static string ResolveWorldName(IDataManager data, uint worldId)
+    {
+        if (worldId == 0) return "";
+        EnsureWorldCache(data);
+        lock (WorldCacheLock)
+            return worldNameById!.TryGetValue(worldId, out var n) ? n : "";
     }
 
     private static string RegionAlias(string regionName, byte regionId)

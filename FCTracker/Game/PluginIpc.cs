@@ -76,9 +76,34 @@ public static class PluginIpc
     {
         try
         {
-            // Cheap probe: GetRegisteredCIDs exists when AR is loaded.
-            Pi.GetIpcSubscriber<List<ulong>>("AutoRetainer.GetRegisteredCIDs").InvokeFunc();
+            // Cheap probe: resolving the subscriber doesn't invoke it.
+            Pi.GetIpcSubscriber<List<ulong>>("AutoRetainer.GetRegisteredCIDs");
             return true;
+        }
+        catch { return false; }
+    }
+
+    // AutoRetainer exposes a proper relog IPC via its EzIPC PluginState group
+    // (AutoRetainer/Modules/EzIPCManagers/IPC_PluginState.cs):
+    //   "AutoRetainer.PluginState.Relog" — bool Relog(string charaNameWithWorld)
+    // Older AR builds don't register it; callers fall back to the chat command.
+    public static bool ArRelogAvailable()
+    {
+        try
+        {
+            Pi.GetIpcSubscriber<string, bool>("AutoRetainer.PluginState.Relog");
+            return true;
+        }
+        catch { return false; }
+    }
+
+    // Returns false when AR declined (busy / auto-login prerequisites unmet).
+    public static bool ArRelog(string charaNameWithWorld)
+    {
+        try
+        {
+            return Pi.GetIpcSubscriber<string, bool>("AutoRetainer.PluginState.Relog")
+                .InvokeFunc(charaNameWithWorld);
         }
         catch { return false; }
     }
@@ -109,21 +134,11 @@ public static class PluginIpc
         catch { return false; }
     }
 
-    public static bool IsLifestreamAvailable()
-    {
-        try
-        {
-            Pi.GetIpcSubscriber<bool>("Lifestream.IsBusy").InvokeFunc();
-            return true;
-        }
-        catch { return false; }
-    }
-
     // Logs into a character from anywhere (connects, opens chara-select, logs in).
     // Confirmed in Lifestream's IPCProvider: ConnectAndLogin(name, homeWorld).
-    // Logs into a character via Lifestream. Returns a human-readable result so the
-    // caller can surface why it failed (Lifestream silently returns false when its
-    // own CanAutoLogin() is not satisfied or it's busy).
+    // Returns a human-readable result so the caller can surface why it failed
+    // (Lifestream silently returns false when its own CanAutoLogin() is not
+    // satisfied or it's busy).
     public static string LifestreamLoginDiagnostic(string charaName, string homeWorld)
     {
         try
@@ -148,16 +163,6 @@ public static class PluginIpc
         {
             return $"Login call failed: {ex.Message}";
         }
-    }
-
-    public static bool LifestreamLogin(string charaName, string homeWorld)
-    {
-        try
-        {
-            return Pi.GetIpcSubscriber<string, string, bool>("Lifestream.ConnectAndLogin")
-                .InvokeFunc(charaName, homeWorld);
-        }
-        catch { return false; }
     }
 
     // ---- reflection helpers (AR's OfflineCharacterData fields are public) ----

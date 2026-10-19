@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.Command;
@@ -124,7 +125,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             Store = new SharedStore(true, Config.SharedStoragePathOverride);
             Config.Characters = Store.LoadAll();
-            Log.Info($"FC Tracker using shared storage: {Store.Path_}");
+            Log.Info($"FC Tracker using shared storage: {Store.FilePath}");
         }
         else
         {
@@ -151,29 +152,34 @@ public sealed class Plugin : IDalamudPlugin
         var summary = new System.Text.StringBuilder();
 
         // Operate on the current in-memory list (already loaded from shared store).
-        var records = Config.Characters;
-
-        if (autoRetainer)
+        // Imports mutate the list (they can add records); take the records lock so a
+        // concurrent framework-thread GetOrCreate can't corrupt the list mid-add.
+        lock (Config.RecordsLock)
         {
-            var path = string.IsNullOrWhiteSpace(Config.AutoRetainerConfigPath)
-                ? Importer.DefaultAutoRetainerConfig()
-                : Config.AutoRetainerConfigPath;
-            var r = Importer.ImportAutoRetainer(records, path, DataManager);
-            foreach (var m in r.Messages) summary.AppendLine(m);
-        }
+            var records = Config.Characters;
 
-        if (submarineTracker)
-        {
-            var path = string.IsNullOrWhiteSpace(Config.SubmarineTrackerDbPath)
-                ? Importer.DefaultSubmarineTrackerDb()
-                : Config.SubmarineTrackerDbPath;
-            var r = Importer.ImportSubmarineTracker(records, path, DataManager);
-            foreach (var m in r.Messages) summary.AppendLine(m);
-        }
+            if (autoRetainer)
+            {
+                var path = string.IsNullOrWhiteSpace(Config.AutoRetainerConfigPath)
+                    ? Importer.DefaultAutoRetainerConfig()
+                    : Config.AutoRetainerConfigPath;
+                var r = Importer.ImportAutoRetainer(records, path, DataManager);
+                foreach (var m in r.Messages) summary.AppendLine(m);
+            }
 
-        // Persist every (possibly new/updated) record.
-        foreach (var rec in records)
-            PersistCharacter(rec);
+            if (submarineTracker)
+            {
+                var path = string.IsNullOrWhiteSpace(Config.SubmarineTrackerDbPath)
+                    ? Importer.DefaultSubmarineTrackerDb()
+                    : Config.SubmarineTrackerDbPath;
+                var r = Importer.ImportSubmarineTracker(records, path, DataManager);
+                foreach (var m in r.Messages) summary.AppendLine(m);
+            }
+
+            // Persist every (possibly new/updated) record.
+            foreach (var rec in records)
+                PersistCharacter(rec);
+        }
 
         // Refresh in-memory view from the store so display is consistent.
         if (Store != null) Config.Characters = Store.LoadAll();
@@ -185,7 +191,8 @@ public sealed class Plugin : IDalamudPlugin
     // Remove a single character/FC entry. Works in both shared and local modes.
     public void DeleteCharacter(ulong contentId)
     {
-        Config.Characters.RemoveAll(x => x.ContentId == contentId);
+        lock (Config.RecordsLock)
+            Config.Characters.RemoveAll(x => x.ContentId == contentId);
         if (Store != null)
         {
             Store.DeleteCharacter(contentId);
@@ -201,20 +208,25 @@ public sealed class Plugin : IDalamudPlugin
     // and its manual notes.
     public void ClearFcData(ulong contentId)
     {
-        var rec = Config.Characters.Find(x => x.ContentId == contentId);
-        if (rec == null) return;
-        rec.Fc = null;
-        rec.Airships.Clear();
-        rec.Submersibles.Clear();
-        rec.VesselsLastUpdatedUtc = null;
-        rec.FirstSeenFcId = 0;
+        CharacterRecord? rec;
+        lock (Config.RecordsLock)
+        {
+            rec = Config.Characters.Find(x => x.ContentId == contentId);
+            if (rec == null) return;
+            rec.Fc = null;
+            rec.Airships.Clear();
+            rec.Submersibles.Clear();
+            rec.VesselsLastUpdatedUtc = null;
+            rec.FirstSeenFcId = 0;
+        }
         PersistCharacter(rec);
         if (Store != null) Config.Characters = Store.LoadAll();
     }
 
     public void ClearAll()
     {
-        Config.Characters.Clear();
+        lock (Config.RecordsLock)
+            Config.Characters.Clear();
         if (Store != null)
         {
             Store.ClearAll();
@@ -224,35 +236,46 @@ public sealed class Plugin : IDalamudPlugin
         Log.Info("FC Tracker: cleared all tracked data.");
     }
 
-    // Logs over to another character by delegating to AutoRetainer's relog command.
-    // AR owns the chara-select automation; we just trigger it. Returns a status
-    // string ("" = sent OK) for the UI to surface.
+    // Logs over to another character. Order of preference:
+    //   1. AutoRetainer's PluginState.Relog IPC (exact machine-readable result).
+    //   2. The /autoretainer relog chat command (older AR builds without the IPC).
+    //   3. Lifestream's ConnectAndLogin (works without AR entirely).
+    // Returns a status string ("" = sent OK) for the UI to surface.
     public string RelogTo(string characterName, string worldName)
     {
         if (string.IsNullOrEmpty(characterName) || string.IsNullOrEmpty(worldName))
             return "Missing character or world name.";
 
-        if (!PluginIpc.IsAutoRetainerAvailable())
-            return "AutoRetainer isn't installed — the login button uses its relog.";
+        if (PluginIpc.ArRelogAvailable())
+        {
+            return PluginIpc.ArRelog($"{characterName}@{worldName}")
+                ? ""
+                : "AutoRetainer declined the relog (busy, or auto-login prerequisites aren't met right now).";
+        }
 
-        try
+        if (PluginIpc.IsAutoRetainerAvailable())
         {
-            // AR parses: /autoretainer relog Character Name@WorldName
-            var cmd = $"/autoretainer relog {characterName}@{worldName}";
-            CommandManager.ProcessCommand(cmd);
-            Log.Info($"FC Tracker: requested relog via AutoRetainer -> {characterName}@{worldName}");
-            return "";
+            try
+            {
+                // AR parses: /autoretainer relog Character Name@WorldName
+                CommandManager.ProcessCommand($"/autoretainer relog {characterName}@{worldName}");
+                Log.Info($"FC Tracker: requested relog via AutoRetainer command -> {characterName}@{worldName}");
+                return "";
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "FC Tracker relog command failed");
+                return $"Relog failed: {ex.Message}";
+            }
         }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "FC Tracker relog command failed");
-            return $"Relog failed: {ex.Message}";
-        }
+
+        return PluginIpc.LifestreamLoginDiagnostic(characterName, worldName);
     }
 
     // Enrich records with AutoRetainer service-account info for ALL registered
     // characters (not just the logged-in one), so account aliases resolve even for
-    // alts not currently online. Throttled by the caller. Best-effort.
+    // alts not currently online. Throttled; called from the framework poll so all
+    // record mutation stays on one thread. Best-effort.
     private DateTime lastArEnrich = DateTime.MinValue;
     public void EnrichFromAutoRetainer(bool force = false)
     {
@@ -263,13 +286,20 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (!PluginIpc.IsAutoRetainerAvailable()) return;
             var cids = PluginIpc.GetRegisteredCharacters();
-            var dirty = false;
+            List<CharacterRecord> snapshot;
+            lock (Config.RecordsLock)
+                snapshot = new List<CharacterRecord>(Config.Characters);
             foreach (var cid in cids)
             {
                 var info = PluginIpc.GetArCharInfo(cid);
                 if (info == null) continue;
-                var rec = Config.Characters.Find(x => x.ContentId == cid);
+                var rec = snapshot.Find(x => x.ContentId == cid);
                 if (rec == null) continue; // only enrich characters we already track
+
+                // Persist only records that actually changed, and always persist:
+                // in shared mode an unsaved change would be clobbered by the next
+                // shared-file refresh.
+                var dirty = false;
                 if (rec.IsWorkshopRunner != info.WorkshopEnabled)
                 {
                     rec.IsWorkshopRunner = info.WorkshopEnabled;
@@ -284,8 +314,8 @@ public sealed class Plugin : IDalamudPlugin
                     rec.SubReturnUnix = latest;
                     dirty = true;
                 }
+                if (dirty) PersistCharacter(rec);
             }
-            if (dirty && Store == null) Config.Save();
         }
         catch (Exception ex) { Log.Error(ex, "FC Tracker AR enrich failed"); }
     }
@@ -391,6 +421,10 @@ public sealed class Plugin : IDalamudPlugin
         var record = Config.GetOrCreate(contentId, name, world);
         record.AccountKey = AccountKey; // roaming path this client runs under
 
+        // Pull AutoRetainer's workshop-runner flag and offline sub timers for every
+        // registered character (throttled internally).
+        EnrichFromAutoRetainer();
+
         // Pull AutoRetainer's workshop-runner flag for this character (defines the
         // FC's sub-runner). Best-effort; no-op if AR isn't loaded.
         var ar = PluginIpc.GetArCharInfo(contentId);
@@ -405,9 +439,16 @@ public sealed class Plugin : IDalamudPlugin
         {
             var prev = record.Fc;
 
+            // The FC's world is its own (an FC can span characters from several
+            // worlds of the same data center); prefer it over the logged-in
+            // character's world for region/DC/world.
+            var fcWorld = GameReader.ResolveWorldName(DataManager, fc.HomeWorldId);
+            fc.HomeWorldName = fcWorld;
+            var worldForFc = !string.IsNullOrEmpty(fcWorld) ? fcWorld : world;
+
             fc.Tag = GameReader.ReadLocalPlayerFcTag(local);
-            fc.Region = GameReader.ResolveRegionCode(DataManager, world);
-            fc.DataCenter = GameReader.ResolveDataCenter(DataManager, world);
+            fc.Region = GameReader.ResolveRegionCode(DataManager, worldForFc);
+            fc.DataCenter = GameReader.ResolveDataCenter(DataManager, worldForFc);
 
             // Credits: hybrid read (AR credit-shop agent if open, else FC window).
             // When neither is available, carry forward the last known value.
